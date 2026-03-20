@@ -224,7 +224,27 @@ def _load_assignments_for_movie(movie: Movie) -> List[Assignment]:
     return q.order_by(Assignment.role.asc(), Assignment.id.asc()).all()
 
 
-def _pick_movie_candidate() -> Optional[Movie]:
+def _movie_score(movie: Movie) -> Tuple[int, int, int, int, int]:
+    assignments = _load_assignments_for_movie(movie)
+    tasks = (
+        TranslationTask.query.filter(
+            or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
+        )
+        .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
+        .all()
+    )
+    active_tasks = sum(1 for task in tasks if (task.status or "").strip().upper() != "COMPLETED")
+    task_status = ((tasks[0].status or "") if tasks else "").strip().upper()
+    task_weight = {"SENT": 3, "READY": 2, "NEW": 1}.get(task_status, 0)
+    movie_status = (movie.status or "").strip().upper()
+    movie_weight = {"IN_PROGRESS": 3, "PENDING": 2, "NEW": 1}.get(movie_status, 0)
+    has_cast = 1 if assignments else 0
+    recency_dt = movie.updated_at or movie.created_at or _utcnow_naive()
+    recency = int(recency_dt.timestamp())
+    return (movie_weight, task_weight, active_tasks, has_cast, recency)
+
+
+def list_db_movie_candidates(limit: int = 8) -> List[Movie]:
     candidates = (
         Movie.query.filter(ACTIVE_MOVIE_EXPR)
         .filter(Movie.status != "ARCHIVED")
@@ -232,22 +252,105 @@ def _pick_movie_candidate() -> Optional[Movie]:
         .all()
     )
     if not candidates:
+        return []
+    ranked = sorted(candidates, key=_movie_score, reverse=True)
+    return ranked[: max(1, limit)]
+
+
+def _pick_movie_candidate() -> Optional[Movie]:
+    candidates = list_db_movie_candidates(limit=1)
+    return candidates[0] if candidates else None
+
+
+def _get_movie_by_code(movie_code: str) -> Optional[Movie]:
+    code = (movie_code or "").strip()
+    if not code:
         return None
+    return Movie.query.filter(Movie.code == code).first()
 
-    def score(movie: Movie) -> Tuple[int, int, int]:
-        assignments = _load_assignments_for_movie(movie)
-        active_tasks = (
-            TranslationTask.query.filter(
-                or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
-            )
-            .filter(TranslationTask.status != "COMPLETED")
-            .count()
+
+def _build_candidate_info(movie: Movie, state: GameState) -> Dict[str, object]:
+    assignments = _load_assignments_for_movie(movie)
+    tasks = (
+        TranslationTask.query.filter(
+            or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
         )
-        has_cast = 1 if assignments else 0
-        recency = int(movie.updated_at.timestamp()) if movie.updated_at else int(movie.created_at.timestamp())
-        return (active_tasks, has_cast, recency)
+        .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
+        .all()
+    )
+    task = tasks[0] if tasks else None
+    priority = _priority_from_text(
+        (task.priority_mode if task else None)
+        or next((a.priority_mode for a in assignments if a.priority_mode), None)
+    )
+    deadlines = [a.deadline_at for a in assignments if a.deadline_at] + [t.deadline_at for t in tasks if t.deadline_at]
+    mission = _build_mission_from_movie(state, movie, assignments, tasks, priority, deadlines)
+    active_tasks = sum(1 for t in tasks if (t.status or "").strip().upper() != "COMPLETED")
+    return {
+        "code": mission.code,
+        "title": mission.title,
+        "status": movie.status,
+        "priority": mission.priority,
+        "translator": mission.assigned_translator or "-",
+        "role_count": len(mission.roles),
+        "total_lines": sum(role.lines for role in mission.roles),
+        "active_tasks": active_tasks,
+        "source": mission.source,
+    }
 
-    return max(candidates, key=score)
+
+def _build_mission_from_movie(
+    state: GameState,
+    movie: Movie,
+    assignments: List[Assignment],
+    tasks: List[TranslationTask],
+    priority: str,
+    deadlines: List[datetime],
+) -> Mission:
+    deadline_day = _deadline_day_from_datetimes(_utcnow_naive(), state.day, deadlines, priority)
+    roles = _build_roles_from_assignments(assignments)
+    if not roles:
+        roles = [
+            RoleSlot(role="man1", lines=80, gender="male"),
+            RoleSlot(role="fem1", lines=70, gender="female"),
+        ]
+
+    total_lines = sum(r.lines for r in roles)
+    reward = 80 + total_lines // 4 + len(roles) * 12
+    xp = 30 + len(roles) * 10 + min(40, total_lines // 25)
+    translator_difficulty = 48 + len(roles) * 7 + min(30, total_lines // 30)
+    qa_threshold = 56 + len(roles) * 5 + (10 if priority == "superurgent" else 0)
+
+    assigned_roles = {
+        (a.role or "").strip(): (a.vo or "").strip()
+        for a in assignments
+        if (a.role or "").strip() and (a.vo or "").strip()
+    }
+
+    task = tasks[0] if tasks else None
+    translator_name = None
+    if task and (task.translator_name or "").strip():
+        translator_name = task.translator_name.strip()
+    elif (movie.translator_assigned or "").strip():
+        translator_name = movie.translator_assigned.strip()
+
+    return Mission(
+        code=(movie.code or f"DB-{movie.id:06d}"),
+        title=(movie.title or "Untitled Project"),
+        year=int(movie.year) if str(movie.year or "").isdigit() else datetime.now(timezone.utc).year,
+        lang=((movie.lang or "bn").strip() or "bn"),
+        priority=priority,
+        reward=reward,
+        xp=xp,
+        deadline_day=deadline_day,
+        translator_difficulty=translator_difficulty,
+        qa_threshold=qa_threshold,
+        roles=roles,
+        assigned_translator=translator_name,
+        assigned_roles=assigned_roles,
+        accepted=False,
+        source="database",
+    )
 
 
 def build_mission_from_db(state: GameState, database_url: Optional[str] = None) -> Optional[Mission]:
@@ -264,57 +367,42 @@ def build_mission_from_db(state: GameState, database_url: Optional[str] = None) 
             .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
             .all()
         )
-
-        task = tasks[0] if tasks else None
         priority = _priority_from_text(
-            (task.priority_mode if task else None)
+            (tasks[0].priority_mode if tasks else None)
             or next((a.priority_mode for a in assignments if a.priority_mode), None)
         )
         deadlines = [a.deadline_at for a in assignments if a.deadline_at] + [t.deadline_at for t in tasks if t.deadline_at]
-        deadline_day = _deadline_day_from_datetimes(_utcnow_naive(), state.day, deadlines, priority)
-        roles = _build_roles_from_assignments(assignments)
-        if not roles:
-            roles = [
-                RoleSlot(role="man1", lines=80, gender="male"),
-                RoleSlot(role="fem1", lines=70, gender="female"),
-            ]
+        return _build_mission_from_movie(state, movie, assignments, tasks, priority, deadlines)
 
-        total_lines = sum(r.lines for r in roles)
-        reward = 80 + total_lines // 4 + len(roles) * 12
-        xp = 30 + len(roles) * 10 + min(40, total_lines // 25)
-        translator_difficulty = 48 + len(roles) * 7 + min(30, total_lines // 30)
-        qa_threshold = 56 + len(roles) * 5 + (10 if priority == "superurgent" else 0)
 
-        assigned_roles = {
-            (a.role or "").strip(): (a.vo or "").strip()
-            for a in assignments
-            if (a.role or "").strip() and (a.vo or "").strip()
-        }
+def list_db_missions(state: GameState, limit: int = 8, database_url: Optional[str] = None) -> List[Dict[str, object]]:
+    with game_db_context(database_url):
+        return [_build_candidate_info(movie, state) for movie in list_db_movie_candidates(limit=limit)]
 
-        translator_name = None
-        if task and (task.translator_name or "").strip():
-            translator_name = task.translator_name.strip()
-        elif (movie.translator_assigned or "").strip():
-            translator_name = movie.translator_assigned.strip()
 
-        mission = Mission(
-            code=(movie.code or f"DB-{movie.id:06d}"),
-            title=(movie.title or "Untitled Project"),
-            year=int(movie.year) if str(movie.year or "").isdigit() else datetime.now(timezone.utc).year,
-            lang=((movie.lang or "bn").strip() or "bn"),
-            priority=priority,
-            reward=reward,
-            xp=xp,
-            deadline_day=deadline_day,
-            translator_difficulty=translator_difficulty,
-            qa_threshold=qa_threshold,
-            roles=roles,
-            assigned_translator=translator_name,
-            assigned_roles=assigned_roles,
-            accepted=False,
-            source="database",
+def build_mission_from_movie_code(
+    state: GameState,
+    movie_code: str,
+    database_url: Optional[str] = None,
+) -> Optional[Mission]:
+    with game_db_context(database_url):
+        movie = _get_movie_by_code(movie_code)
+        if movie is None:
+            return None
+        assignments = _load_assignments_for_movie(movie)
+        tasks = (
+            TranslationTask.query.filter(
+                or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
+            )
+            .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
+            .all()
         )
-        return mission
+        priority = _priority_from_text(
+            (tasks[0].priority_mode if tasks else None)
+            or next((a.priority_mode for a in assignments if a.priority_mode), None)
+        )
+        deadlines = [a.deadline_at for a in assignments if a.deadline_at] + [t.deadline_at for t in tasks if t.deadline_at]
+        return _build_mission_from_movie(state, movie, assignments, tasks, priority, deadlines)
 
 
 def load_db_mission_into_state(state: GameState, database_url: Optional[str] = None) -> Optional[Mission]:
@@ -323,6 +411,19 @@ def load_db_mission_into_state(state: GameState, database_url: Optional[str] = N
         return None
     state.current_mission = mission
     state.log.append(f"DB mission loaded: {mission.code} — {mission.title}")
+    return mission
+
+
+def load_specific_db_mission_into_state(
+    state: GameState,
+    movie_code: str,
+    database_url: Optional[str] = None,
+) -> Optional[Mission]:
+    mission = build_mission_from_movie_code(state, movie_code, database_url)
+    if mission is None:
+        return None
+    state.current_mission = mission
+    state.log.append(f"DB mission picked: {mission.code} — {mission.title}")
     return mission
 
 

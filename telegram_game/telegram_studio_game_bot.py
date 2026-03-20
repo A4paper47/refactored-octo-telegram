@@ -9,7 +9,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from telegram_game.db_integration import (
+    list_db_missions,
     load_db_mission_into_state,
+    load_specific_db_mission_into_state,
     persist_mission_assignments,
     persist_submission_result,
     sync_state_with_db,
@@ -105,9 +107,9 @@ def _menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("✅ Accept", callback_data="g|accept")],
         [InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
-        [InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb")],
-        [InlineKeyboardButton("👥 Roster", callback_data="g|roster"), InlineKeyboardButton("📜 Log", callback_data="g|log")],
-        [InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
+        [InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
+        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("👥 Roster", callback_data="g|roster")],
+        [InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
 
 
@@ -119,6 +121,8 @@ def _help_text() -> str:
         "/newgame — reset studio\n"
         "/mission — tengok misi\n"
         "/dbmission — paksa load mission dari DB\n"
+        "/missions — senarai mission aktif dari DB\n"
+        "/pick <code> — pilih mission tertentu dari DB\n"
         "/syncdb — sync translator/VO dari DB\n"
         "/accept — terima misi\n"
         "/autocast — auto assign team\n"
@@ -130,6 +134,18 @@ def _help_text() -> str:
         "/nextday — maju hari\n"
         "/status — ringkasan studio"
     )
+
+
+def _missions_text(items: list[dict]) -> str:
+    if not items:
+        return "❌ Tiada mission aktif dijumpai dalam DB."
+    lines = ["📚 DB mission list", "Guna /pick <code> untuk pilih mission tertentu.", ""]
+    for item in items:
+        lines.append(
+            f"- {item['code']} | {item['title']} | {item['priority']} | roles {item['role_count']} | "
+            f"lines {item['total_lines']} | translator {item['translator']}"
+        )
+    return "\n".join(lines)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -180,6 +196,35 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             text = f"🗄️ DB mission loaded\n\n{mission_summary(mission)}"
     except Exception as exc:
         text = f"❌ DB mission gagal load: {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    try:
+        items = list_db_missions(state, limit=8)
+        text = _missions_text(items)
+    except Exception as exc:
+        text = f"❌ Tak dapat ambil list mission DB: {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    code = " ".join(context.args).strip()
+    if not code:
+        text = "Usage: /pick <movie_code>"
+    else:
+        try:
+            mission = load_specific_db_mission_into_state(state, code)
+            if mission is None:
+                text = f"❌ Mission {code} tak jumpa dalam DB."
+            else:
+                text = f"🎯 Mission dipilih dari DB\n\n{mission_summary(mission)}"
+        except Exception as exc:
+            text = f"❌ Pick mission gagal: {exc}"
     _save(state)
     await update.effective_message.reply_text(text, reply_markup=_menu())
 
@@ -254,7 +299,7 @@ async def cmd_assign(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
             text = f"🎙️ Role {role_name} → {assigned}"
             if db_info:
-                text += f"\nDB assignments synced."
+                text += "\nDB assignments synced."
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
@@ -341,6 +386,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     mapping = {
         "mission": cmd_mission,
         "dbmission": cmd_dbmission,
+        "missions": cmd_missions,
         "syncdb": cmd_syncdb,
         "accept": cmd_accept,
         "autocast": cmd_autocast,
@@ -362,6 +408,8 @@ def build_game_app() -> Application:
     app.add_handler(CommandHandler("newgame", cmd_newgame))
     app.add_handler(CommandHandler("mission", cmd_mission))
     app.add_handler(CommandHandler("dbmission", cmd_dbmission))
+    app.add_handler(CommandHandler("missions", cmd_missions))
+    app.add_handler(CommandHandler("pick", cmd_pick))
     app.add_handler(CommandHandler("syncdb", cmd_syncdb))
     app.add_handler(CommandHandler("accept", cmd_accept))
     app.add_handler(CommandHandler("autocast", cmd_autocast))

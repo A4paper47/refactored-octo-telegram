@@ -10,7 +10,9 @@ from db import init_db, db
 from models import Assignment, Movie, MovieEvent, TranslationTask, Translator, VORoleSubmission, VOTeam
 from telegram_game.db_integration import (
     build_mission_from_db,
+    list_db_missions,
     load_db_roster,
+    load_specific_db_mission_into_state,
     persist_mission_assignments,
     persist_submission_result,
     sync_state_with_db,
@@ -41,12 +43,23 @@ def _seed_sqlite(db_url: str) -> None:
             status="IN_PROGRESS",
             translator_assigned="Ryan",
         )
-        db.session.add(movie)
+        movie2 = Movie(
+            code="MS-260320-02",
+            title="Golden Signal",
+            year="2024",
+            lang="ms",
+            status="NEW",
+            translator_assigned="Sumi",
+        )
+        db.session.add_all([movie, movie2])
         db.session.flush()
         db.session.add_all([
             Assignment(project="BN-260320-01", movie_id=movie.id, vo="Ray", role="man1", lines=120, priority_mode="urgent"),
             Assignment(project="BN-260320-01", movie_id=movie.id, vo="Sara", role="fem1", lines=90, priority_mode="urgent"),
             TranslationTask(movie_id=movie.id, movie_code="BN-260320-01", title="Shadow Harbor", translator_name="Ryan", status="SENT", priority_mode="urgent"),
+            Assignment(project="MS-260320-02", movie_id=movie2.id, vo="Ray", role="man1", lines=40, priority_mode="flexible"),
+            Assignment(project="MS-260320-02", movie_id=movie2.id, vo="Sara", role="fem1", lines=30, priority_mode="flexible"),
+            TranslationTask(movie_id=movie2.id, movie_code="MS-260320-02", title="Golden Signal", translator_name="Sumi", status="NEW", priority_mode="flexible"),
         ])
         db.session.commit()
     if previous is None:
@@ -169,3 +182,31 @@ def test_persist_submission_result_marks_completed_and_creates_vo_submissions():
         assert len(submissions) == 2
         assert {s.role for s in submissions} == {"man1", "fem1"}
         assert any(e.event_type == "GAME_SUBMIT_OK" for e in events)
+
+
+def test_list_db_missions_returns_ranked_candidates():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(777, "Hybrid Studio")
+        items = list_db_missions(state, limit=8, database_url=db_url)
+        assert len(items) >= 2
+        assert items[0]["code"] == "BN-260320-01"
+        assert any(item["code"] == "MS-260320-02" for item in items)
+
+
+def test_load_specific_db_mission_into_state_picks_requested_code():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(888, "Hybrid Studio")
+        mission = load_specific_db_mission_into_state(state, "MS-260320-02", database_url=db_url)
+        assert mission is not None
+        assert mission.code == "MS-260320-02"
+        assert mission.title == "Golden Signal"
+        assert state.current_mission is not None
+        assert state.current_mission.code == "MS-260320-02"

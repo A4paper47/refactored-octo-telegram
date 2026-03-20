@@ -31,6 +31,8 @@ Versi game:
 - `/newgame [studio name]`
 - `/mission`
 - `/dbmission` → force load mission daripada DB sebenar
+- `/missions` → senarai mission aktif dari DB
+- `/pick <code>` → pilih mission tertentu dari DB
 - `/syncdb` → sync translator + VO roster daripada DB sebenar
 - `/accept`
 - `/autocast`
@@ -67,6 +69,8 @@ python -m telegram_game.telegram_studio_game_bot
 Bila `GAME_USE_DB=1` dan `DATABASE_URL` tersedia:
 - `/syncdb` akan tarik `translator` + `vo_team` jadi roster game
 - `/dbmission` akan bina mission daripada `movie` + `assignment` + `translation_task`
+- `/missions` akan paparkan shortlist mission DB yang boleh diuji
+- `/pick <code>` akan load project tertentu terus ke state game
 - assignment sedia ada dalam DB akan terus dipaparkan sebagai cast awal
 - translator assigned sedia ada akan dibaca sebagai assigned translator untuk mission
 - `/assigntr`, `/assign`, `/clearcast`, dan `/autocast` akan sync balik assignment ke DB bila mission datang dari DB
@@ -98,6 +102,7 @@ Sudah siap:
 - automated tests untuk engine + DB integration
 - DB write-back untuk assignment dan submission
 - manual cast commands
+- DB mission listing + explicit mission pick by code
 
 Belum siap:
 - shop / upgrade / rarity system
@@ -107,6 +112,6 @@ Belum siap:
 
 1. Sambung dengan `assign_logic.py` untuk auto-cast yang lebih real ikut level/speed sebenar.
 2. Tambah progression layer: hire, unlock, upgrade, burnout, premium clients.
-3. Tambah command list mission macam `/missions` dan `/pick <code>`.
-4. Tambah leaderboard / season progression.
+3. Tambah leaderboard / season progression.
+4. Sambung heuristic penuh dari `assign_logic.py`.
 5. Bila loop dah solid, baru naikkan ke Telegram Web App / HTML5.

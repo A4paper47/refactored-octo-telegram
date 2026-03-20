@@ -165,3 +165,42 @@ Sebelum deploy live, kau dah boleh test flow hampir sebenar:
 - belum ada command pilih mission tertentu dari senarai
 - belum integrate heuristic penuh dari `assign_logic.py`
 - belum ada UI WebApp/game canvas
+
+
+---
+
+## V4 Update — Mission List + Pick Specific Project
+
+Pre-live testing sekarang lebih praktikal sebab bot tak lagi bergantung pada auto-pick sahaja.
+
+### Apa yang ditambah
+
+- command baru:
+  - `/missions`
+  - `/pick <code>`
+- button menu baru untuk lihat shortlist mission DB
+- ranking candidate mission DB supaya project aktif lebih diutamakan
+- helper untuk load mission tertentu berdasarkan `movie_code`
+- test coverage baru untuk mission listing dan manual pick
+
+### Kegunaan praktikal
+
+Sebelum deploy live, kau dah boleh:
+- tengok beberapa project dari DB yang sesuai dijadikan mission
+- pilih sendiri project mana nak test
+- elak bot auto-ambil project yang bukan kau nak
+- test write-back pada mission tertentu dengan lebih terkawal
+
+### Status ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `python -m py_compile telegram_game/*.py` ✅
+- total: **10 passed**
+
+### Limit semasa
+
+- belum ada paging / filter by translator / filter by status
+- button pick terus dari inline list belum dibuat
+- belum integrate heuristic penuh dari `assign_logic.py`
+- belum ada WebApp/game canvas
