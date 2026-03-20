@@ -208,6 +208,15 @@ def assign_role(state: GameState, role_name: str, staff_name: str) -> str:
     return member.name
 
 
+
+
+def clear_assignments(state: GameState) -> Mission:
+    mission = ensure_mission(state)
+    mission.assigned_translator = None
+    mission.assigned_roles.clear()
+    return mission
+
+
 def accept_mission(state: GameState) -> Mission:
     mission = ensure_mission(state)
     mission.accepted = True

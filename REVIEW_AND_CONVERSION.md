@@ -126,3 +126,42 @@ Game sekarang bukan sekadar “theme based on project asal”, tapi sudah mula:
 3. Reuse `assign_logic.py` sebagai scoring/autocast sebenar
 4. Tambah economy: hire / fire / upgrade / burnout
 5. Buat mode group co-op untuk satu project dimainkan ramai user
+
+
+---
+
+## V3 Update — DB Write-Back + Manual Casting
+
+Hybrid mode sekarang bukan setakat baca dari DB, tapi juga boleh **tulis semula** hasil gameplay ke struktur asal bila mission datang dari database.
+
+### Apa yang ditambah
+
+- command baru:
+  - `/assigntr <nama>`
+  - `/assign <role> <nama>`
+  - `/clearcast`
+- write-back assignment ke DB:
+  - update `movie.translator_assigned`
+  - sync / create `translation_task`
+  - sync `assignment` ikut cast semasa
+  - create audit event dalam `movie_event`
+- write-back submit result ke DB:
+  - bila lulus QA, mark `movie.status = COMPLETED`
+  - mark `translation_task.status = COMPLETED`
+  - create `vo_role_submission` untuk setiap role
+
+### Kegunaan praktikal
+
+Sebelum deploy live, kau dah boleh test flow hampir sebenar:
+- load mission dari DB
+- assign translator manual
+- assign cast manual
+- submit mission
+- tengok perubahan terus masuk balik ke DB
+
+### Limit semasa
+
+- generated mission mode masih tak tulis ke DB
+- belum ada command pilih mission tertentu dari senarai
+- belum integrate heuristic penuh dari `assign_logic.py`
+- belum ada UI WebApp/game canvas

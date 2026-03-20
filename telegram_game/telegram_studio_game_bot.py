@@ -8,10 +8,18 @@ from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-from telegram_game.db_integration import load_db_mission_into_state, sync_state_with_db
+from telegram_game.db_integration import (
+    load_db_mission_into_state,
+    persist_mission_assignments,
+    persist_submission_result,
+    sync_state_with_db,
+)
 from telegram_game.game_engine import (
     accept_mission,
+    assign_role,
+    assign_translator,
     auto_cast,
+    clear_assignments,
     ensure_mission,
     latest_log,
     load_state,
@@ -55,6 +63,27 @@ def _sync_if_possible(state) -> Optional[dict]:
         return None
 
 
+def _persist_assignments_if_db(state, actor_name: str) -> Optional[dict]:
+    mission = state.current_mission
+    if not GAME_USE_DB or mission is None or mission.source != "database":
+        return None
+    try:
+        return persist_mission_assignments(state, actor_name=actor_name)
+    except Exception as exc:
+        log.warning("DB assignment write-back failed: %s", exc)
+        return None
+
+
+def _persist_submission_if_db(mission, result: dict, actor_name: str) -> Optional[dict]:
+    if not GAME_USE_DB or mission is None or mission.source != "database":
+        return None
+    try:
+        return persist_submission_result(mission, result, actor_name=actor_name)
+    except Exception as exc:
+        log.warning("DB submission write-back failed: %s", exc)
+        return None
+
+
 def _ensure_bot_mission(state):
     if state.current_mission is not None:
         return state.current_mission
@@ -82,13 +111,8 @@ def _menu() -> InlineKeyboardMarkup:
     ])
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    state = _load_or_create(user.id)
-    stats = _sync_if_possible(state)
-    text = (
-        f"🎮 Selamat datang ke *Studio Dub Tycoon*, {user.first_name or 'Player'}!\n\n"
-        f"Mode: *{_mode_label()}*\n"
+def _help_text() -> str:
+    return (
         "Game ni tukar workflow asal Web VO Tracker jadi management sim dalam Telegram:\n"
         "project → translator → VO cast → QA → reward.\n\n"
         "Command utama:\n"
@@ -98,10 +122,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/syncdb — sync translator/VO dari DB\n"
         "/accept — terima misi\n"
         "/autocast — auto assign team\n"
+        "/assigntr <nama> — assign translator manual\n"
+        "/assign <role> <nama> — assign VO manual\n"
+        "/clearcast — clear semua assignment semasa\n"
         "/submit — hantar ke QA\n"
         "/roster — tengok staff\n"
         "/nextday — maju hari\n"
         "/status — ringkasan studio"
+    )
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    state = _load_or_create(user.id)
+    stats = _sync_if_possible(state)
+    text = (
+        f"🎮 Selamat datang ke *Studio Dub Tycoon*, {user.first_name or 'Player'}!\n\n"
+        f"Mode: *{_mode_label()}*\n"
+        f"{_help_text()}"
     )
     if stats:
         text += f"\n\nSync DB awal: {stats['translator']} translator, {stats['male']} male VO, {stats['female']} female VO"
@@ -175,15 +213,71 @@ async def cmd_autocast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
     picks = auto_cast(state)
+    db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
     _save(state)
     pretty = "\n".join(f"- {k}: {v}" for k, v in picks.items()) if picks else "- Tiada cast tersedia"
-    await update.effective_message.reply_text(f"🤖 Auto cast siap untuk {mission.code}:\n{pretty}", reply_markup=_menu())
+    extra = ""
+    if db_info:
+        extra = f"\n\nDB synced: task #{db_info['translation_task_id']}, assignments +{db_info['assignment_created']} created"
+    await update.effective_message.reply_text(f"🤖 Auto cast siap untuk {mission.code}:\n{pretty}{extra}", reply_markup=_menu())
+
+
+async def cmd_assigntr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    name = " ".join(context.args).strip()
+    if not name:
+        text = "Usage: /assigntr <nama translator>"
+    else:
+        try:
+            assigned = assign_translator(state, name)
+            db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+            text = f"📝 Translator assigned: {assigned}"
+            if db_info:
+                text += f"\nDB task synced: #{db_info['translation_task_id']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_assign(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    if len(context.args) < 2:
+        text = "Usage: /assign <role> <nama staff>"
+    else:
+        role_name = context.args[0].strip()
+        staff_name = " ".join(context.args[1:]).strip()
+        try:
+            assigned = assign_role(state, role_name, staff_name)
+            db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+            text = f"🎙️ Role {role_name} → {assigned}"
+            if db_info:
+                text += f"\nDB assignments synced."
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_clearcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    mission = clear_assignments(state)
+    db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+    _save(state)
+    text = f"🧹 Assignment dibersihkan untuk {mission.code}"
+    if db_info:
+        text += "\nDB assignment state disync semula."
+    await update.effective_message.reply_text(text, reply_markup=_menu())
 
 
 async def cmd_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
+    mission_before = state.current_mission
     try:
         result = resolve_submission(state)
+        db_info = _persist_submission_if_db(mission_before, result, actor_name=update.effective_user.first_name or "player")
         verdict = "🏆 QA LULUS" if result["passed"] else "💥 QA GAGAL"
         text = (
             f"{verdict}\n"
@@ -193,6 +287,8 @@ async def cmd_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"XP: +{result['xp']}\n"
             f"Studio coins sekarang: {state.coins}"
         )
+        if db_info:
+            text += f"\nDB write-back: {'COMPLETED' if db_info['passed'] else 'updated only'}, VO submissions +{db_info['vo_submissions_created']}"
     except Exception as exc:
         text = f"❌ {exc}"
     _save(state)
@@ -269,6 +365,9 @@ def build_game_app() -> Application:
     app.add_handler(CommandHandler("syncdb", cmd_syncdb))
     app.add_handler(CommandHandler("accept", cmd_accept))
     app.add_handler(CommandHandler("autocast", cmd_autocast))
+    app.add_handler(CommandHandler("assigntr", cmd_assigntr))
+    app.add_handler(CommandHandler("assign", cmd_assign))
+    app.add_handler(CommandHandler("clearcast", cmd_clearcast))
     app.add_handler(CommandHandler("submit", cmd_submit))
     app.add_handler(CommandHandler("roster", cmd_roster))
     app.add_handler(CommandHandler("status", cmd_status))

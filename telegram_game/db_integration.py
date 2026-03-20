@@ -9,7 +9,15 @@ from flask import Flask
 from sqlalchemy import func, or_
 
 from db import init_db, db
-from models import Assignment, Movie, TranslationTask, Translator, VORoleSubmission, VOTeam
+from models import (
+    Assignment,
+    Movie,
+    MovieEvent,
+    TranslationTask,
+    Translator,
+    VORoleSubmission,
+    VOTeam,
+)
 from telegram_game.game_engine import GameState, Mission, RoleSlot, Staff
 
 
@@ -60,6 +68,10 @@ def game_db_context(database_url: Optional[str] = None):
             os.environ.pop("DATABASE_URL", None)
         else:
             os.environ["DATABASE_URL"] = previous
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _safe_name(value: Optional[str], fallback: str) -> str:
@@ -259,7 +271,7 @@ def build_mission_from_db(state: GameState, database_url: Optional[str] = None) 
             or next((a.priority_mode for a in assignments if a.priority_mode), None)
         )
         deadlines = [a.deadline_at for a in assignments if a.deadline_at] + [t.deadline_at for t in tasks if t.deadline_at]
-        deadline_day = _deadline_day_from_datetimes(datetime.now(timezone.utc).replace(tzinfo=None), state.day, deadlines, priority)
+        deadline_day = _deadline_day_from_datetimes(_utcnow_naive(), state.day, deadlines, priority)
         roles = _build_roles_from_assignments(assignments)
         if not roles:
             roles = [
@@ -312,3 +324,224 @@ def load_db_mission_into_state(state: GameState, database_url: Optional[str] = N
     state.current_mission = mission
     state.log.append(f"DB mission loaded: {mission.code} — {mission.title}")
     return mission
+
+
+def _get_movie_by_mission(mission: Mission) -> Movie:
+    code = (mission.code or "").strip()
+    movie = None
+    if code:
+        movie = Movie.query.filter(Movie.code == code).first()
+    if movie is None:
+        raise RuntimeError(f"Movie untuk mission {mission.code} tak jumpa dalam DB.")
+    return movie
+
+
+def _latest_task_for_movie(movie: Movie) -> Optional[TranslationTask]:
+    return (
+        TranslationTask.query.filter(
+            or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
+        )
+        .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
+        .first()
+    )
+
+
+def _upsert_translation_task(movie: Movie, mission: Mission, now: datetime) -> TranslationTask:
+    task = _latest_task_for_movie(movie)
+    if task is None:
+        task = TranslationTask(
+            movie_id=movie.id,
+            movie_code=movie.code,
+            title=movie.title,
+            year=movie.year,
+            lang=movie.lang,
+            created_at=now,
+        )
+        db.session.add(task)
+
+    task.movie_id = movie.id
+    task.movie_code = movie.code
+    task.title = movie.title
+    task.year = movie.year
+    task.lang = movie.lang
+    task.translator_name = mission.assigned_translator
+    task.priority_mode = mission.priority
+    if task.status != "COMPLETED":
+        task.status = "SENT"
+    if not task.sent_at:
+        task.sent_at = now
+    task.updated_at = now
+    return task
+
+
+def _sync_assignment_rows(movie: Movie, mission: Mission, now: datetime) -> Tuple[int, int]:
+    existing = {row.role.strip().lower(): row for row in _load_assignments_for_movie(movie) if (row.role or "").strip()}
+    created = 0
+    updated = 0
+    for role in mission.roles:
+        key = role.role.strip().lower()
+        row = existing.get(key)
+        if row is None:
+            row = Assignment(
+                project=movie.code or mission.code,
+                movie_id=movie.id,
+                vo=mission.assigned_roles.get(role.role, "") or "UNASSIGNED",
+                role=role.role,
+                lines=int(role.lines or 0),
+                urgent=mission.priority in {"superurgent", "urgent"},
+                priority_mode=mission.priority,
+                created_at=now,
+            )
+            db.session.add(row)
+            created += 1
+        else:
+            updated += 1
+        row.project = movie.code or mission.code
+        row.movie_id = movie.id
+        row.role = role.role
+        row.lines = int(role.lines or 0)
+        row.vo = mission.assigned_roles.get(role.role, row.vo) or row.vo or "UNASSIGNED"
+        row.priority_mode = mission.priority
+        row.urgent = mission.priority in {"superurgent", "urgent"}
+    return created, updated
+
+
+def _add_movie_event(
+    movie: Movie,
+    event_type: str,
+    summary: str,
+    detail: Optional[str] = None,
+    actor_name: str = "telegram_game",
+    now: Optional[datetime] = None,
+) -> MovieEvent:
+    evt = MovieEvent(
+        movie_id=movie.id,
+        movie_code=movie.code,
+        movie_title=movie.title,
+        event_type=event_type,
+        summary=summary,
+        detail=detail,
+        actor_source="telegram_game",
+        actor_name=actor_name,
+        created_at=now or _utcnow_naive(),
+    )
+    db.session.add(evt)
+    return evt
+
+
+def persist_mission_assignments(
+    state: GameState,
+    database_url: Optional[str] = None,
+    actor_name: str = "telegram_game",
+) -> Dict[str, object]:
+    mission = state.current_mission
+    if mission is None:
+        raise RuntimeError("Tiada mission aktif untuk disimpan ke DB.")
+    if mission.source != "database":
+        raise RuntimeError("Write-back DB hanya untuk mission yang datang dari database.")
+
+    with game_db_context(database_url):
+        now = _utcnow_naive()
+        movie = _get_movie_by_mission(mission)
+        movie.translator_assigned = mission.assigned_translator
+        movie.status = movie.status or "IN_PROGRESS"
+        if movie.status == "NEW":
+            movie.status = "IN_PROGRESS"
+        movie.updated_at = now
+
+        task = _upsert_translation_task(movie, mission, now)
+        created, updated = _sync_assignment_rows(movie, mission, now)
+
+        detail_lines = [f"translator={mission.assigned_translator or '-'}"]
+        for role in mission.roles:
+            detail_lines.append(f"{role.role}={mission.assigned_roles.get(role.role, '-')}")
+        _add_movie_event(
+            movie,
+            event_type="GAME_ASSIGN",
+            summary=f"Game mission sync untuk {mission.code}",
+            detail="\n".join(detail_lines),
+            actor_name=actor_name,
+            now=now,
+        )
+        db.session.commit()
+        return {
+            "movie_id": movie.id,
+            "movie_code": movie.code,
+            "translation_task_id": task.id,
+            "assignment_created": created,
+            "assignment_updated": updated,
+        }
+
+
+def _create_submission_rows(movie: Movie, mission: Mission, now: datetime) -> int:
+    created = 0
+    for role in mission.roles:
+        vo_name = mission.assigned_roles.get(role.role)
+        if not vo_name:
+            continue
+        row = VORoleSubmission(
+            movie=movie.code or mission.code,
+            vo=vo_name,
+            role=role.role,
+            lines=int(role.lines or 0),
+            submitted_at=now,
+        )
+        db.session.add(row)
+        created += 1
+    return created
+
+
+def persist_submission_result(
+    mission: Mission,
+    result: Dict[str, object],
+    database_url: Optional[str] = None,
+    actor_name: str = "telegram_game",
+) -> Dict[str, object]:
+    if mission.source != "database":
+        raise RuntimeError("Submission write-back DB hanya untuk mission database.")
+
+    with game_db_context(database_url):
+        now = _utcnow_naive()
+        movie = _get_movie_by_mission(mission)
+        task = _upsert_translation_task(movie, mission, now)
+        submissions_created = 0
+        passed = bool(result.get("passed"))
+
+        if passed:
+            movie.translator_assigned = mission.assigned_translator
+            movie.status = "COMPLETED"
+            movie.submitted_at = now
+            movie.completed_at = now
+            movie.updated_at = now
+            task.status = "COMPLETED"
+            task.completed_at = now
+            task.updated_at = now
+            submissions_created = _create_submission_rows(movie, mission, now)
+            summary = f"Mission {mission.code} lulus QA dengan score {result.get('qa_score')}"
+            detail = f"reward={result.get('reward')} xp={result.get('xp')} threshold={result.get('threshold')}"
+            event_type = "GAME_SUBMIT_OK"
+        else:
+            movie.status = movie.status or "IN_PROGRESS"
+            movie.updated_at = now
+            task.status = "SENT"
+            task.updated_at = now
+            summary = f"Mission {mission.code} gagal QA dengan score {result.get('qa_score')}"
+            detail = f"threshold={result.get('threshold')}"
+            event_type = "GAME_SUBMIT_FAIL"
+
+        _add_movie_event(
+            movie,
+            event_type=event_type,
+            summary=summary,
+            detail=detail,
+            actor_name=actor_name,
+            now=now,
+        )
+        db.session.commit()
+        return {
+            "movie_id": movie.id,
+            "movie_code": movie.code,
+            "passed": passed,
+            "vo_submissions_created": submissions_created,
+            "translation_task_id": task.id,
+        }
