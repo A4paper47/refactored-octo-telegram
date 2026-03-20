@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>VO Team</h2>
+
+<div class="card">
+  <h3>Add member</h3>
+  <form method="post" class="row vo-form-row">
+    <input type="hidden" name="action" value="add">
+    <input name="name" placeholder="Name" required>
+    <input name="tg_username" placeholder="Telegram username (optional, without @)">
+    <input name="tg_user_id" placeholder="Telegram user id (optional)">
+    <select name="gender">
+      <option value="male">male</option>
+      <option value="female">female</option>
+    </select>
+    <select name="level">
+      <option value="expert_old">Pro</option>
+      <option value="trained_new" selected>Skilled</option>
+      <option value="new_limited">Rookie</option>
+    </select>
+    <select name="speed">
+      <option value="normal" selected>normal</option>
+      <option value="slow">slow</option>
+    </select>
+    <label class="chk">
+      <input type="checkbox" name="urgent_ok" checked> <span>Urgent OK</span>
+    </label>
+    <label class="chk">
+      <input type="checkbox" name="active" checked> <span>Active</span>
+    </label>
+    <button type="submit">Add</button>
+  </form>
+</div>
+
+<div class="table-wrap wide">
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Telegram</th>
+      <th>Gender</th><th>Level</th><th>Speed</th><th>Urgent</th><th>Active</th><th>Save</th><th>Delete</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for m in members %}
+    <tr>
+      <td>
+        {#
+          IMPORTANT: Don't nest <form> inside <tr>/<tbody> directly.
+          Keep the form inside a <td> (valid HTML) and link controls using form="...".
+          This prevents browser DOM reflow bugs (ghost header rows).
+        #}
+        <form method="post" id="row-{{ m.id }}" class="row-form">
+          <input type="hidden" name="action" value="update">
+          <input type="hidden" name="id" value="{{ m.id }}">
+        </form>
+        <b>{{ m.name }}</b>
+        {% if m.last_seen_at %}
+          <div class="muted" style="margin-top:4px;">Last seen: {{ m.last_seen_at.strftime('%Y-%m-%d %H:%M') }} UTC</div>
+        {% endif %}
+      </td>
+      <td>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <input name="tg_username" form="row-{{ m.id }}" value="{{ m.tg_username or '' }}" placeholder="username" style="width:160px;">
+          <input name="tg_user_id" form="row-{{ m.id }}" value="{{ m.tg_user_id or '' }}" placeholder="user id" style="width:150px;">
+        </div>
+        <div class="muted" style="margin-top:4px;">Needed for DM reminders.</div>
+      </td>
+      <td>
+          <select name="gender" form="row-{{ m.id }}">
+            <option value="male" {% if m.gender=='male' %}selected{% endif %}>male</option>
+            <option value="female" {% if m.gender=='female' %}selected{% endif %}>female</option>
+          </select>
+      </td>
+      <td>
+          <select name="level" form="row-{{ m.id }}">
+            <option value="expert_old" {% if m.level=='expert_old' %}selected{% endif %}>Pro</option>
+            <option value="trained_new" {% if m.level=='trained_new' %}selected{% endif %}>Skilled</option>
+            <option value="new_limited" {% if m.level=='new_limited' %}selected{% endif %}>Rookie</option>
+          </select>
+      </td>
+      <td>
+          <select name="speed" form="row-{{ m.id }}">
+            <option value="normal" {% if m.speed=='normal' %}selected{% endif %}>normal</option>
+            <option value="slow" {% if m.speed=='slow' %}selected{% endif %}>slow</option>
+          </select>
+      </td>
+      <td style="text-align:center;">
+        <input form="row-{{ m.id }}" type="checkbox" name="urgent_ok" {% if m.urgent_ok %}checked{% endif %}>
+      </td>
+      <td style="text-align:center;">
+        <input form="row-{{ m.id }}" type="checkbox" name="active" {% if m.active %}checked{% endif %}>
+      </td>
+      <td><button form="row-{{ m.id }}" type="submit">Save</button></td>
+      <td>
+        <form id="del-{{ m.id }}" method="post" action="{{ url_for('vo_team_panel') }}" onsubmit="return confirm('Delete this VO? (Only allowed if Active is OFF)');">
+          <input type="hidden" name="action" value="delete"/>
+          <input type="hidden" name="id" value="{{ m.id }}"/>
+        </form>
+        <button class="btn danger" form="del-{{ m.id }}" type="submit">Delete</button>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<p class="muted" style="margin-top:12px;">Tip: Manage Telegram admins with /admin_add, /admin_list, /admin_remove in the bot (owner only).</p>
+
+{% endblock %}

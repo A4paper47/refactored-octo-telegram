@@ -1,0 +1,94 @@
+{% extends 'auth_base.html' %}
+{% block content %}
+<div class="auth-shell">
+  <div class="auth-hero">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <div class="auth-title">Web VO Tracker</div>
+        <div class="muted">Admin access • Feb 2026 v4</div>
+      </div>
+    </div>
+
+    <div class="auth-loader" id="authLoader" aria-live="polite">
+      <div class="auth-loader-top">
+        <span class="muted">SYSTEM BOOT</span>
+        <span class="auth-percent" id="authPercent">0%</span>
+      </div>
+      <div class="auth-bar">
+        <div class="auth-bar-fill" id="authBar"></div>
+      </div>
+      <div class="auth-loader-hint muted">Initializing panels…</div>
+    </div>
+  </div>
+
+  <div class="card auth-card" id="authCard" style="opacity:.05; transform: translateY(10px);">
+    <h2 style="margin-top:0;">Login</h2>
+    <p class="muted" style="margin-top:-6px;">Private admin panel.</p>
+
+    <form method="post" autocomplete="on">
+      <label>Email</label>
+      <input name="email" placeholder="admin@local" required>
+
+      <label>Password</label>
+      <input name="password" type="password" placeholder="••••••••" required>
+
+      <div class="row" style="margin-top:12px; justify-content: space-between; width:100%;">
+        <button type="submit">Sign in</button>
+        <span class="muted" style="font-family: var(--font-mono);">SECURE</span>
+      </div>
+    </form>
+
+    <div class="muted" style="margin-top:14px; font-family: var(--font-mono); font-size:12px;">
+      Tip: Save your Render ENV <code>ADMIN_EMAIL</code> & <code>ADMIN_PASSWORD</code>.
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const bar = document.getElementById('authBar');
+  const pct = document.getElementById('authPercent');
+  const card = document.getElementById('authCard');
+
+  let p = 0;
+  const steps = [
+    {to: 18, ms: 240},
+    {to: 42, ms: 260},
+    {to: 67, ms: 280},
+    {to: 86, ms: 220},
+    {to: 100, ms: 180},
+  ];
+
+  function tick(target, interval){
+    const t = setInterval(()=>{
+      p += Math.max(1, Math.round((target - p) / 10));
+      if(p >= target){ p = target; clearInterval(t); next(); }
+      bar.style.width = p + '%';
+      pct.textContent = p + '%';
+      if(p >= 90){
+        card.style.opacity = '1';
+        card.style.transform = 'translateY(0px)';
+      }
+    }, interval);
+  }
+
+  let i = 0;
+  function next(){
+    i += 1;
+    if(i >= steps.length){
+      // final reveal
+      setTimeout(()=>{
+        card.style.opacity = '1';
+        card.style.transform = 'translateY(0px)';
+      }, 120);
+      return;
+    }
+    tick(steps[i].to, steps[i].ms);
+  }
+
+  // Start immediately
+  tick(steps[0].to, steps[0].ms);
+})();
+</script>
+{% endblock %}

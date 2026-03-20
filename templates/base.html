@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title or 'Web VO Tracker' }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Fonts: cleaner + more professional -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=(app_version ~ '-' ~ build_id)) }}">
+</head>
+<body>
+  <script>
+  // Apply saved theme ASAP to avoid flash of wrong theme
+  (function(){
+    try{
+      const saved = localStorage.getItem('theme') || 'default';
+      if(saved === 'endfield') document.body.classList.add('theme-endfield');
+    }catch(e){}
+  })();
+  </script>
+  <!-- Visual FX overlays (pure CSS, pointer-events: none) -->
+  <div class="fx scanlines" aria-hidden="true"></div>
+  {% set more_active = request.endpoint in ['backups_panel','restore_panel','title_repair_panel','movie_aliases_panel','archived_panel','bulk_movies_panel','cleanup_presets_panel','duplicates_panel','tips_panel'] %}
+  <div class="topbar">
+    <div class="topbar-main">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <b>Web VO Tracker</b>
+          <div class="muted" style="margin-top:2px; font-size:12px;">v{{ app_version }} • {{ build_id }}</div>
+          {% if title %}<div class="muted" style="margin-top:2px;">{{ title }}</div>{% endif %}
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <select class="theme-select" id="themeSelect" title="Theme">
+          <option value="default">Default</option>
+          <option value="endfield">Endfield (Light)</option>
+        </select>
+        <button type="button" class="btn btn-secondary btn-sm" id="openLogs" title="Open system logs">Logs</button>
+        {% if not login_disabled %}
+          <a class="navlink navlink-utility" href="{{ url_for('logout') }}">Logout</a>
+        {% elif panel_key_enabled %}
+          <a class="navlink navlink-utility" href="{{ url_for('lock_panel') }}">Lock</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="topbar-nav">
+      <nav class="nav nav-primary" aria-label="Main navigation">
+        <a class="navlink {{ 'active' if request.endpoint=='dashboard' else '' }}" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="navlink {{ 'active' if request.endpoint=='queue_panel' else '' }}" href="{{ url_for('queue_panel') }}">Queue</a>
+        <a class="navlink {{ 'active' if request.endpoint=='assignments_panel' else '' }}" href="{{ url_for('assignments_panel') }}">Assignments</a>
+        <a class="navlink {{ 'active' if request.endpoint in ['role_imports_panel','role_import_detail'] else '' }}" href="{{ url_for('role_imports_panel') }}">Role Imports</a>
+        <a class="navlink {{ 'active' if request.endpoint=='resolve_tools_panel' else '' }}" href="{{ url_for('resolve_tools_panel') }}">Resolve</a>
+        <a class="navlink {{ 'active' if request.endpoint=='activity_panel' else '' }}" href="{{ url_for('activity_panel') }}">Activity</a>
+        <a class="navlink {{ 'active' if request.endpoint=='vo_team_panel' else '' }}" href="{{ url_for('vo_team_panel') }}">VO Team</a>
+        <a class="navlink {{ 'active' if request.endpoint=='translators_panel' else '' }}" href="{{ url_for('translators_panel') }}">Translators</a>
+        <a class="navlink {{ 'active' if request.endpoint=='telegram_panel' else '' }}" href="{{ url_for('telegram_panel') }}">Telegram</a>
+      </nav>
+
+      <details class="nav-more {{ 'active' if more_active else '' }}" {% if more_active %}open{% endif %}>
+        <summary class="navlink nav-more-summary">More</summary>
+        <div class="nav-more-menu">
+          <a class="navlink {{ 'active' if request.endpoint=='backups_panel' else '' }}" href="{{ url_for('backups_panel') }}">Backups</a>
+          <a class="navlink {{ 'active' if request.endpoint=='restore_panel' else '' }}" href="{{ url_for('restore_panel') }}">Restore</a>
+          <a class="navlink {{ 'active' if request.endpoint=='title_repair_panel' else '' }}" href="{{ url_for('title_repair_panel') }}">Title Repair</a>
+          <a class="navlink {{ 'active' if request.endpoint=='movie_aliases_panel' else '' }}" href="{{ url_for('movie_aliases_panel') }}">Aliases</a>
+          <a class="navlink {{ 'active' if request.endpoint=='archived_panel' else '' }}" href="{{ url_for('archived_panel') }}">Archived</a>
+          <a class="navlink {{ 'active' if request.endpoint=='bulk_movies_panel' else '' }}" href="{{ url_for('bulk_movies_panel') }}">Bulk Ops</a>
+          <a class="navlink {{ 'active' if request.endpoint=='cleanup_presets_panel' else '' }}" href="{{ url_for('cleanup_presets_panel') }}">Cleanup</a>
+          <a class="navlink {{ 'active' if request.endpoint=='duplicates_panel' else '' }}" href="{{ url_for('duplicates_panel') }}">Merge</a>
+          <a class="navlink {{ 'active' if request.endpoint=='tips_panel' else '' }}" href="{{ url_for('tips_panel') }}">Tips</a>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="wrap">
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="flash">
+          {% for m in messages %}
+            <div>{{ m }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <!-- Logs modal (pop-out console) -->
+  <div class="modal-backdrop" id="modalBackdrop" aria-hidden="true"></div>
+  <div class="modal card" id="logsModal" aria-hidden="true">
+    <div class="modal-head">
+      <div class="modal-title">System Logs</div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" id="clearLogsErrors" type="button" title="Delete only error/warn logs">Delete errors</button>
+        <button class="btn btn-danger btn-sm" id="clearLogsAll" type="button" title="Delete all logs">Reset logs</button>
+        <button class="modal-close" id="closeLogs" type="button">Close</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="muted" style="margin-bottom:10px">Latest actions, web commands, and errors (auto-refresh).</div>
+      <div id="logsBody"></div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    // Theme switcher (Default <-> Endfield Light)
+    const sel = document.getElementById('themeSelect');
+    const saved = localStorage.getItem('theme') || 'default';
+    if(saved === 'endfield') document.body.classList.add('theme-endfield');
+    if(sel){
+      sel.value = saved;
+      sel.addEventListener('change', ()=>{
+        const v = sel.value || 'default';
+        document.body.classList.toggle('theme-endfield', v === 'endfield');
+        localStorage.setItem('theme', v);
+      });
+    }
+
+    // Logs modal
+    const openBtn = document.getElementById('openLogs');
+    const closeBtn = document.getElementById('closeLogs');
+    const modal = document.getElementById('logsModal');
+    const backdrop = document.getElementById('modalBackdrop');
+    const body = document.getElementById('logsBody');
+    let timer = null;
+
+    function render(items){
+      if(!body) return;
+      body.innerHTML = '';
+      (items||[]).forEach(it=>{
+        const div = document.createElement('div');
+        const lvl = (it.level||'INFO').toUpperCase();
+        div.className = 'log-line lvl-' + lvl;
+        div.textContent = '[' + lvl + '] ' + (it.ts||'') + (it.source ? ' (' + it.source + ')' : '') + "\n" + (it.message||'') + (it.traceback ? "\n" + it.traceback : '');
+        body.appendChild(div);
+      });
+      body.scrollTop = body.scrollHeight;
+    }
+    async function fetchLogs(){
+      try{
+        const res = await fetch('/logs?limit=60');
+        if(!res.ok) return;
+        const data = await res.json();
+        render(data.logs||[]);
+      }catch(e){}
+    }
+
+    async function clearLogs(mode){
+      try{
+        const body = new URLSearchParams();
+        body.set('mode', mode);
+        await fetch('/logs/clear', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body});
+        await fetchLogs();
+      }catch(e){}
+    }
+    function openModal(){
+      if(!modal || !backdrop) return;
+      modal.classList.add('show');
+      backdrop.classList.add('show');
+      fetchLogs();
+      timer = setInterval(fetchLogs, 2500);
+    }
+    function closeModal(){
+      if(!modal || !backdrop) return;
+      modal.classList.remove('show');
+      backdrop.classList.remove('show');
+      if(timer) clearInterval(timer);
+      timer = null;
+    }
+    if(openBtn) openBtn.addEventListener('click', openModal);
+    if(closeBtn) closeBtn.addEventListener('click', closeModal);
+    if(backdrop) backdrop.addEventListener('click', closeModal);
+
+    const clearAllBtn = document.getElementById('clearLogsAll');
+    const clearErrBtn = document.getElementById('clearLogsErrors');
+    if(clearAllBtn) clearAllBtn.addEventListener('click', async ()=>{
+      if(!confirm('Delete ALL system logs?')) return;
+      await clearLogs('all');
+    });
+    if(clearErrBtn) clearErrBtn.addEventListener('click', async ()=>{
+      if(!confirm('Delete ERROR/WARN logs only?')) return;
+      await clearLogs('errors');
+    });
+  })();
+  </script>
+</body>
+</html>

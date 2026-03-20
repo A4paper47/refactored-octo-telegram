@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Merge Simulator</h2>
+<div class="card" style="margin-top:12px;">
+  <div class="row" style="justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+    <div>
+      <div class="muted">Preview only — no database changes yet.</div>
+      <h3 style="margin:6px 0 0 0;">{{ source.title or source.code }} → {{ target.title or target.code }}</h3>
+      <div class="muted" style="margin-top:6px;">Source {{ source.code }} into target {{ target.code }}</div>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <span class="pill">Risk: {{ (sim.preview.severity or 'low')|upper }}</span>
+      <span class="pill">Warnings: {{ sim.preview.warnings_count or 0 }}</span>
+      <span class="pill">Rows moving: {{ sim.preview.total_rows or 0 }}</span>
+    </div>
+  </div>
+  <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('duplicates_panel', q=q, limit=limit) }}">Back to Duplicates</a>
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('assignments_view', project=source.code) }}">Open Source</a>
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('assignments_view', project=target.code) }}">Open Target</a>
+  </div>
+</div>
+
+<div class="grid" style="grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Source</h3>
+    <div><b>{{ source.title or '-' }}</b></div>
+    <div class="muted">{{ source.code }} • {{ source.year or '-' }} • {{ (source.lang or '-')|upper }} • {{ source.status or '-' }}{% if source.is_archived %} • archived{% endif %}</div>
+    <div style="margin-top:10px; line-height:1.6;">
+      <div><b>Translator:</b> {{ sim.source.translator_assigned or '-' }}</div>
+      <div><b>Movie card:</b> {{ sim.source.movie_card_chat_id or '-' }}</div>
+      <div><b>VO group:</b> {{ sim.source.vo_group_chat_id or '-' }}</div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <tr><th>Assignments</th><td>{{ sim.source.counts.assignments }}</td></tr>
+        <tr><th>VO submissions</th><td>{{ sim.source.counts.vo_submissions }}</td></tr>
+        <tr><th>Translation tasks</th><td>{{ sim.source.counts.translation_tasks }}</td></tr>
+        <tr><th>Translation submissions</th><td>{{ sim.source.counts.translation_submissions }}</td></tr>
+        <tr><th>Group requests</th><td>{{ sim.source.counts.group_requests }}</td></tr>
+        <tr><th>History events</th><td>{{ sim.source.counts.events }}</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Target</h3>
+    <div><b>{{ target.title or '-' }}</b></div>
+    <div class="muted">{{ target.code }} • {{ target.year or '-' }} • {{ (target.lang or '-')|upper }} • {{ target.status or '-' }}{% if target.is_archived %} • archived{% endif %}</div>
+    <div style="margin-top:10px; line-height:1.6;">
+      <div><b>Translator:</b> {{ sim.target.translator_assigned or '-' }}</div>
+      <div><b>Movie card:</b> {{ sim.target.movie_card_chat_id or '-' }}</div>
+      <div><b>VO group:</b> {{ sim.target.vo_group_chat_id or '-' }}</div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <tr><th>Assignments</th><td>{{ sim.target.counts.assignments }}</td></tr>
+        <tr><th>VO submissions</th><td>{{ sim.target.counts.vo_submissions }}</td></tr>
+        <tr><th>Translation tasks</th><td>{{ sim.target.counts.translation_tasks }}</td></tr>
+        <tr><th>Translation submissions</th><td>{{ sim.target.counts.translation_submissions }}</td></tr>
+        <tr><th>Group requests</th><td>{{ sim.target.counts.group_requests }}</td></tr>
+        <tr><th>History events</th><td>{{ sim.target.counts.events }}</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="grid" style="grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Role overlap</h3>
+    <div class="muted">Assignment roles</div>
+    <div style="margin-top:6px; line-height:1.6;">
+      <div><b>Overlap:</b> {{ (sim.diff.assignment_overlap|join(', ')) if sim.diff.assignment_overlap else '-' }}</div>
+      <div><b>Source only:</b> {{ (sim.diff.assignment_source_only|join(', ')) if sim.diff.assignment_source_only else '-' }}</div>
+      <div><b>Target only:</b> {{ (sim.diff.assignment_target_only|join(', ')) if sim.diff.assignment_target_only else '-' }}</div>
+    </div>
+    <div class="muted" style="margin-top:10px;">VO submission roles</div>
+    <div style="margin-top:6px; line-height:1.6;">
+      <div><b>Overlap:</b> {{ (sim.diff.vo_overlap|join(', ')) if sim.diff.vo_overlap else '-' }}</div>
+      <div><b>Source only:</b> {{ (sim.diff.vo_source_only|join(', ')) if sim.diff.vo_source_only else '-' }}</div>
+      <div><b>Target only:</b> {{ (sim.diff.vo_target_only|join(', ')) if sim.diff.vo_target_only else '-' }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">People compare</h3>
+    <div class="muted">Translation task people</div>
+    <div style="margin-top:6px; line-height:1.6;">
+      <div><b>Overlap:</b> {{ (sim.diff.translator_people_overlap|join(', ')) if sim.diff.translator_people_overlap else '-' }}</div>
+      <div><b>Source only:</b> {{ (sim.diff.translator_people_source_only|join(', ')) if sim.diff.translator_people_source_only else '-' }}</div>
+      <div><b>Target only:</b> {{ (sim.diff.translator_people_target_only|join(', ')) if sim.diff.translator_people_target_only else '-' }}</div>
+    </div>
+    <div class="muted" style="margin-top:10px;">VO submitters</div>
+    <div style="margin-top:6px; line-height:1.6;">
+      <div><b>Source:</b> {{ (sim.source.vo_submitters|join(', ')) if sim.source.vo_submitters else '-' }}</div>
+      <div><b>Target:</b> {{ (sim.target.vo_submitters|join(', ')) if sim.target.vo_submitters else '-' }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Warnings</h3>
+  {% if sim.preview.warnings %}
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      {% for warn in sim.preview.warnings %}
+      <div class="muted">• {{ warn }}</div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="muted">No major conflicts detected in preview.</div>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Run real merge</h3>
+  <form method="post" action="{{ url_for('duplicates_merge') }}" class="row" style="gap:10px; align-items:end; flex-wrap:wrap;">
+    <input type="hidden" name="q" value="{{ q or '' }}" />
+    <input type="hidden" name="limit" value="{{ limit }}" />
+    <input type="hidden" name="source_code" value="{{ source.code }}" />
+    <input type="hidden" name="target_code" value="{{ target.code }}" />
+    <div>
+      <label class="muted">After merge</label>
+      <select name="mode">
+        <option value="archive">Archive source</option>
+        <option value="delete">Hard delete source</option>
+      </select>
+    </div>
+    <div>
+      <label class="muted">Type MERGE</label>
+      <input type="text" name="confirm" placeholder="MERGE" style="width:120px;" />
+    </div>
+    <button class="btn btn-danger" type="submit" onclick="return confirm('Run real merge now?');">Run real merge</button>
+  </form>
+</div>
+{% endblock %}

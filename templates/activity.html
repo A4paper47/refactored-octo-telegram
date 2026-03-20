@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Activity Feed</h2>
+<div class="card" style="margin-top:12px;">
+  <form method="get" class="row" style="gap:10px; align-items:end; flex-wrap:wrap;">
+    <div style="min-width:260px; flex:1;">
+      <label class="muted">Search</label>
+      <input type="text" name="q" value="{{ q or '' }}" placeholder="Inside Out, BN-260308-01, ARCHIVE, assign" />
+    </div>
+    <div>
+      <label class="muted">Event</label>
+      <select name="event_type">
+        {% for ev in event_types %}
+        <option value="{{ ev }}" {% if event_type == ev %}selected{% endif %}>{{ ev }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="muted">Source</label>
+      <select name="source">
+        <option value="all" {% if source == 'all' %}selected{% endif %}>All</option>
+        <option value="web" {% if source == 'web' %}selected{% endif %}>Web</option>
+        <option value="tg" {% if source == 'tg' %}selected{% endif %}>Telegram</option>
+      </select>
+    </div>
+    <div>
+      <label class="muted">Archived</label>
+      <select name="archived">
+        <option value="all" {% if archived == 'all' %}selected{% endif %}>All</option>
+        <option value="active" {% if archived == 'active' %}selected{% endif %}>Active only</option>
+        <option value="archived" {% if archived == 'archived' %}selected{% endif %}>Archived only</option>
+      </select>
+    </div>
+    <div>
+      <label class="muted">Limit</label>
+      <select name="limit">
+        {% for n in [50, 120, 200, 300, 500] %}
+        <option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">Apply</button>
+    <a class="btn btn-secondary" href="{{ url_for('activity_export', q=q, event_type=event_type, source=source, archived=archived, limit=limit) }}">Export CSV</a>
+    {% if q or event_type != 'ALL' or source != 'all' or archived != 'all' or limit != 120 %}
+      <a class="btn btn-secondary" href="{{ url_for('activity_panel') }}">Reset</a>
+    {% endif %}
+  </form>
+  <div class="muted" style="margin-top:8px;">Latest movie actions from web + Telegram. Filter by movie, code, event, source, and archived state. Export keeps the same filters.</div>
+</div>
+
+<div class="card" style="margin-top:18px;">
+  <div class="row" style="justify-content:space-between; align-items:center; gap:10px;">
+    <h3 style="margin:0;">Recent activity</h3>
+    <div class="muted">{{ rows|length }} row(s)</div>
+  </div>
+  <div class="table-wrap" style="margin-top:10px;">
+    <table>
+      <thead><tr><th>Time</th><th>Movie</th><th>Event</th><th>Summary</th><th>Actor</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.ts }}</td>
+          <td>
+            <div><b>{{ r.movie_title }}</b></div>
+            <div class="muted">{{ r.movie_code }}{% if r.is_archived %} • archived{% endif %}</div>
+          </td>
+          <td><span class="badge inqa">{{ r.event_type }}</span></td>
+          <td>
+            <div>{{ r.summary }}</div>
+            {% if r.detail %}<div class="muted" style="margin-top:4px;">{{ r.detail }}</div>{% endif %}
+          </td>
+          <td>
+            <div>{{ r.actor }}</div>
+            <div class="muted">{{ r.actor_source }}</div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">No activity matched the current filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

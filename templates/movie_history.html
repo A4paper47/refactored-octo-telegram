@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="margin-bottom:10px;">
+  <div class="section-title"><h2 style="margin:0;">Movie History</h2></div>
+  <div class="muted" style="margin-top:6px;">
+    <b style="color:var(--text)">{{ movie.title }}{% if movie.year %} ({{ movie.year }}){% endif %}</b>
+    <span style="opacity:.75;">• {{ movie.code }}</span>
+    {% if movie.lang %}<span style="opacity:.75;">• {{ movie.lang|upper }}</span>{% endif %}
+    {% if movie.is_archived %}<span class="badge warn" style="margin-left:8px;">ARCHIVED</span>{% endif %}
+  </div>
+</div>
+
+<div class="card" style="padding:16px;">
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+    <a class="btn btn-secondary" href="{{ url_for('assignments_view', project=movie.code) }}">Back to movie</a>
+    <a class="btn btn-secondary" href="{{ url_for('archived_panel') }}">Archived</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Time</th><th>Type</th><th>Summary</th><th>Actor</th><th>Detail</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.ts }}</td>
+          <td><span class="badge">{{ r.event_type }}</span></td>
+          <td><b>{{ r.summary }}</b></td>
+          <td>{{ r.actor }}</td>
+          <td class="muted">{{ r.detail or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">No history found for this movie yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

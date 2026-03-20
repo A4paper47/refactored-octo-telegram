@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Queue</h2>
+<div class="card">
+  <p class="muted">
+    Status flow: <code>READY_FOR_QA</code> → <code>IN_QA</code> → <code>DONE</code>
+    or <code>REJECTED</code> (requires note).
+    Once DONE/REJECTED, it is locked.
+  </p>
+</div>
+
+<div class="card">
+  <h3>Queue reset tools</h3>
+  <form method="post" action="{{ url_for('queue_reset') }}" class="row vo-form-row">
+    <select name="mode" required>
+      <option value="unlock">Unlock (DONE/REJECTED/IN_QA → READY_FOR_QA)</option>
+      <option value="purge_done_rejected">Delete DONE/REJECTED</option>
+      <option value="purge_all">Delete ALL (careful)</option>
+    </select>
+    <input name="movie" placeholder="Filter by movie code/title (optional)">
+    <label class="chk">
+      <input type="checkbox" name="confirm" value="1"> <span>CONFIRM</span>
+    </label>
+    <button type="submit" class="btn-danger">Run</button>
+  </form>
+  <p class="muted" style="margin-top:10px;">Use this when queue is stuck/locked by mistake. Unlock will also set related Movie status back to READY_FOR_QA.</p>
+</div>
+
+<div class="table-wrap wide">
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Movie</th>
+      <th>Status</th>
+      <th>Submitter</th>
+      <th>Submitted (UTC)</th>
+      <th>Content</th>
+      <th>Note</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in rows %}
+    <tr>
+      <td>#{{ s.id }}</td>
+      <td>{{ s.movie }}</td>
+      <td>
+        {% set st = s.status %}
+        <span class="badge
+          {% if st=='READY_FOR_QA' %}ready
+          {% elif st=='IN_QA' %}inqa
+          {% elif st=='DONE' %}done
+          {% elif st=='REJECTED' %}rejected
+          {% else %}inqa{% endif %}
+        " title="{{ st }}">{{ st }}</span>
+      </td>
+      <td>{{ s.submitter_username or s.submitter_id or '-' }}</td>
+      <td>{{ s.submitted_at.strftime('%Y-%m-%d %H:%M') if s.submitted_at else '-' }}</td>
+      <td>
+        {% if s.content_type == 'text' %}
+          <div class="muted">text</div>
+        {% else %}
+          <div class="muted">{{ s.file_name or 'document' }}</div>
+        {% endif %}
+      </td>
+      <td style="min-width:260px;">
+        <form method="post" action="{{ url_for('queue_note', sid=s.id) }}">
+          <input name="note" value="{{ s.note or '' }}" placeholder="(optional)" {% if s.status in ('DONE','REJECTED') %}disabled{% endif %} />
+          <div style="height:8px;"></div>
+          <button type="submit" class="btn-secondary" {% if s.status in ('DONE','REJECTED') %}disabled{% endif %}>Save note</button>
+        </form>
+      </td>
+      <td style="min-width:240px;">
+        <div class="row">
+          <form method="post" action="{{ url_for('queue_action', sid=s.id, action='in_qa') }}">
+            <button type="submit" {% if s.status in ('DONE','REJECTED') %}disabled{% endif %}>QA</button>
+          </form>
+          <form method="post" action="{{ url_for('queue_action', sid=s.id, action='done') }}">
+            <button type="submit" class="btn-success" {% if s.status in ('DONE','REJECTED') %}disabled{% endif %}>Done</button>
+          </form>
+          <form method="post" action="{{ url_for('queue_action', sid=s.id, action='reject') }}">
+            <button type="submit" class="btn-danger" {% if s.status in ('DONE','REJECTED') %}disabled{% endif %}>Reject</button>
+          </form>
+          <form method="post" action="{{ url_for('queue_delete', sid=s.id) }}" onsubmit="return confirm('Delete this queue item?');">
+            <button type="submit" class="btn-danger" style="opacity:0.85;">Delete</button>
+          </form>
+        </div>
+        {% if s.status in ('DONE','REJECTED') %}
+          <div class="badge warn" style="margin-top:10px; width:fit-content;">LOCKED</div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Tips & Workflow</h2>
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin-top:0;">Translator (DM)</h3>
+  <ul class="muted" style="margin-top:8px;">
+    <li>Send <b>.srt</b> in DM (no caption needed).</li>
+    <li>Best filename: <code>MOVIECODE.srt</code> (example: <code>BN-260303-01.srt</code>) for perfect matching.</li>
+    <li>After submit: system creates Queue row + (optional) forwards to outbox.</li>
+  </ul>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin-top:0;">VO (Group)</h3>
+  <ul class="muted" style="margin-top:8px;">
+    <li>Upload media/zip and put <b>movie code + role + lines</b> in caption.</li>
+    <li>Example: <code>BN-260303-01 man-1 120</code></li>
+    <li>ZIP supported: filenames containing <code>man1/man-1/fem2/fem-2</code> etc are auto-detected.</li>
+  </ul>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin-top:0;">Deadlines</h3>
+  <ul class="muted" style="margin-top:8px;">
+    <li><b>Late/Overdue only counts if deadline exists</b>.</li>
+    <li>If <code>deadline_at</code> is empty/NULL → NOT late.</li>
+    <li>Use workload pages to set deadlines and send reminders.</li>
+  </ul>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin-top:0;">Backups & Restore</h3>
+  <ul class="muted" style="margin-top:8px;">
+    <li>Go to <b>Backups</b> to download: JSON ZIP (best for restore), Excel (sharing), logs.txt (debug).</li>
+    <li>To send backups to Telegram: run <code>/backup_here</code> in the target chat, then <code>/backup_now dest json</code>.</li>
+    <li>To restore: go to <b>Restore</b> → upload JSON ZIP → dry run → choose <b>Replace</b> or <b>Append</b> → type <code>RESTORE</code>.</li>
+  </ul>
+</div>
+
+{% endblock %}

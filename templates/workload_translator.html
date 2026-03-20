@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+  <div>
+    <h2 style="margin:0;">Translator workload — {{ tr_name }}</h2>
+    <div class="muted" style="margin-top:6px;">Translation tasks sent to this translator.</div>
+  </div>
+  <div class="row" style="gap:10px; flex-wrap:wrap;">
+    <a class="btn" href="{{ url_for('dashboard') }}">Back</a>
+    <a class="btn" href="{{ url_for('workload_translator') }}?name={{ tr_name|urlencode }}">Show all</a>
+    <a class="btn" href="{{ url_for('workload_translator') }}?name={{ tr_name|urlencode }}&show=pending">Show pending</a>
+    <a class="btn" href="{{ url_for('workload_translator') }}?name={{ tr_name|urlencode }}&show=overdue">Show overdue</a>
+  </div>
+</div>
+
+<div class="grid" style="grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-top:14px;">
+  <div class="card"><div class="muted">Total</div><div class="big" style="font-size:28px;">{{ summary.total }}</div></div>
+  <div class="card"><div class="muted">Pending</div><div class="big" style="font-size:28px;">{{ summary.pending }}</div></div>
+  <div class="card"><div class="muted">Late</div><div class="big" style="font-size:28px;">{{ summary.late }}</div></div>
+  <div class="card"><div class="muted">Done</div><div class="big" style="font-size:28px;">{{ summary.done }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <div class="table-wrap wide">
+    <table>
+      <thead>
+        <tr>
+          <th>Movie</th>
+          <th>File</th>
+          <th>Deadline (MYT)</th>
+          <th>Status</th>
+          <th>Sent (UTC)</th>
+          <th>Completed (UTC)</th>
+          <th>Queue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tasks %}
+          <tr>
+            <td>
+              <b>{{ t.display }}</b>
+              {% if t.code %}
+                <div class="muted" style="margin-top:4px;">Code: {{ t.code }}</div>
+              {% endif %}
+            </td>
+            <td>
+              <code>{{ t.file_name }}</code>
+              {% if t.file_size_kb %}
+                <div class="muted" style="margin-top:4px;">{{ t.file_size_kb }} KB</div>
+              {% endif %}
+            </td>
+            <td>{{ t.deadline_myt or '-' }}</td>
+            <td>
+              {% if t.status == 'COMPLETED' %}
+                <span class="badge done">DONE</span>
+              {% elif t.is_late %}
+                <span class="badge late">OVERDUE</span>
+              {% elif t.is_pending %}
+                <span class="badge ready">PENDING</span>
+              {% else %}
+                <span class="badge inqa">{{ t.status }}</span>
+              {% endif %}
+            </td>
+            <td>{{ t.sent_utc or '-' }}</td>
+            <td>{{ t.completed_utc or '-' }}</td>
+            <td>
+              <a class="btn" href="{{ url_for('queue_panel') }}?q={{ (t.code or t.display)|urlencode }}">Open</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

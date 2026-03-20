@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Assignments</h2>
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin:0 0 10px 0;">Quick Start — Create Project</h3>
+  <div class="muted" style="margin-bottom:10px;">Paste your role list and the system will auto-assign VOs (man* → male, fem* → female). Duplicate buckets are summed.</div>
+  <form method="post" action="{{ url_for('assignments_new') }}">
+    <div class="grid" style="grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px;">
+      <div>
+        <label class="muted">Movie name or code</label>
+        <input name="project" placeholder="Inside Out 2 or BN-260303-01" />
+      </div>
+      <div>
+        <label class="muted">Title (optional override)</label>
+        <input name="title" placeholder="(optional)" />
+      </div>
+      <div>
+        <label class="muted">Year (optional)</label>
+        <input name="year" placeholder="2026" />
+      </div>
+      <div>
+        <label class="muted">Lang (optional)</label>
+        <input name="lang" placeholder="bn / ms" />
+      </div>
+    </div>
+    <div class="muted" style="margin-top:8px; font-size:12px;">
+      You can now type the movie name only. If no code is given, the system auto-generates the movie code and saves assignments under that code. Telegram bot also supports title-first flow via /create_project.
+    </div>
+    <div class="grid" style="grid-template-columns: 220px 1fr; gap:10px; margin-top:10px;">
+      <div>
+        <label class="muted">Mode</label>
+        <select name="mode">
+          <option value="superurgent">Super Urgent (12h • urgent_ok only)</option>
+          <option value="urgent" selected>Urgent (24h • urgent_ok only)</option>
+          <option value="nonurgent">Non-Urgent (36h • include all actives)</option>
+          <option value="flexible">Flexible (48h • include all actives)</option>
+        </select>
+        <div class="muted" style="margin-top:8px; font-size:12px;">Example:</div>
+        <pre style="margin:6px 0 0 0; white-space:pre-wrap; font-size:12px;">man-1 120
+fem-1 80
+man-2 55</pre>
+      </div>
+      <div>
+        <label class="muted">Role list</label>
+        <textarea name="bulk_text" rows="7" placeholder="man-1 120
+fem-2 98
+..."></textarea>
+      </div>
+    </div>
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button class="btn" type="submit">Create & Auto-Assign</button>
+      <div class="muted">This will replace existing assignments for that movie/project and auto-set VO deadlines by mode (12h / 24h / 36h / 48h).</div>
+    </div>
+  </form>
+</div>
+
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin:0 0 10px 0;">Open movie by title or code</h3>
+  <div class="muted" style="margin-bottom:10px;">Use this to open a movie even when it has zero active roles. Archived movies are managed from the Archived page.</div>
+  <form method="get" action="{{ url_for('assignments_view') }}" class="row" style="align-items:end; gap:10px;">
+    <div style="min-width:320px; flex:1;">
+      <label class="muted">Movie title or code</label>
+      <input name="project" placeholder="Inside Out 2 or BN-260303-01" />
+    </div>
+    <div>
+      <button class="btn-secondary" type="submit">Open Movie</button>
+    </div>
+    <div class="muted" style="font-size:12px;">Tip: use Archived tab for archived movies.</div>
+    <div class="muted" style="font-size:12px;">After opening a movie, use <b>Movie History</b> to see archive/unarchive/assign timeline.</div>
+    <div class="muted" style="font-size:12px;">Need mass cleanup? Use <b>Bulk Ops</b> in the topbar to archive / clear many movies at once.</div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div class="table-wrap wide">
+  <table>
+  <thead>
+    <tr>
+      <th>Project/Movie</th>
+      <th>Roles</th>
+      <th>Total Lines</th>
+      <th>Last Updated</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>
+        <div><b>{{ r.display_name }}</b></div>
+        {% if r.subtitle %}
+          <div class="muted" style="font-size:12px;">{{ r.subtitle }}</div>
+        {% endif %}
+      </td>
+      <td>{{ r.roles or 0 }}</td>
+      <td>{{ r.total_lines or 0 }}</td>
+      <td>{{ r.last_created }}</td>
+      <td><a class="btn-secondary" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.16);" href="{{ url_for('assignments_view', project=r.project_code) }}">View</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Cleanup Presets</h2>
+<div class="card" style="margin-top:12px;">
+  <div class="muted">Preset views for stale / inactive movies. Use these to jump into Bulk Ops faster without typing the same filters every time.</div>
+</div>
+
+<div class="grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-top:16px;">
+  {% for spec in specs %}
+  <div class="card">
+    <div class="row" style="justify-content:space-between; align-items:flex-start; gap:10px;">
+      <div>
+        <h3 style="margin:0;">{{ spec.title }}</h3>
+        <div class="muted" style="margin-top:6px;">{{ spec.desc }}</div>
+      </div>
+      <div class="pill">{{ spec.count }} movie(s)</div>
+    </div>
+    <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:12px;">
+      <a class="btn btn-sm" href="{{ url_for('bulk_movies_panel', scope=spec.scope, preset=spec.key, limit=50) }}">Open in Bulk Ops</a>
+    </div>
+    <div class="muted" style="margin-top:12px; font-size:12px;">Sample</div>
+    <div style="margin-top:6px; display:flex; flex-direction:column; gap:6px;">
+      {% for row in spec.sample %}
+        <div>• <b>{{ row.display_name }}</b> <span class="muted">{{ row.code }} • {{ row.age_days }}d • roles {{ row.roles }}</span></div>
+      {% else %}
+        <div class="muted">No movies matched this preset right now.</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

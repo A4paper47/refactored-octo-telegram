@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2 style="margin-top:0">Movie Title Repair</h2>
+  <form method="get" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:14px;">
+    <div>
+      <label>Search</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="code or title">
+    </div>
+    <div>
+      <label>Limit</label>
+      <input type="number" name="limit" value="{{ limit }}" min="1" max="200" style="width:100px;">
+    </div>
+    <div><button class="btn" type="submit">Refresh</button></div>
+  </form>
+  <div class="muted" style="margin-bottom:10px;">Repairs bad titles like <code>fem1 movie name</code> back to the clean movie title. Archived movies are included.</div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Movie</th>
+          <th>Current Title</th>
+          <th>Suggested Title</th>
+          <th>Conflict</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        {% set m = row.movie %}
+        <tr>
+          <td>
+            <b>{{ m.code }}</b><br>
+            <span class="muted">{{ (m.lang or '').upper() or '-' }} • {{ m.year or '-' }}{% if m.is_archived %} • archived{% endif %}</span>
+          </td>
+          <td>{{ row.old_title }}</td>
+          <td>{{ row.new_title }}</td>
+          <td>
+            {% if row.conflict %}
+              <b>{{ row.conflict.code }}</b><br>
+              <span class="muted">{{ row.conflict.title }}{% if row.conflict.year %} ({{ row.conflict.year }}){% endif %}</span>
+            {% else %}-{% endif %}
+          </td>
+          <td>
+            {% if row.conflict %}
+              <span class="muted">Blocked</span>
+            {% else %}
+              <form method="post" action="{{ url_for('title_repair_run') }}">
+                <input type="hidden" name="movie_code" value="{{ m.code }}">
+                <input type="hidden" name="q" value="{{ q }}">
+                <input type="hidden" name="limit" value="{{ limit }}">
+                <button class="btn btn-secondary" type="submit">Repair</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">No repair candidates found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

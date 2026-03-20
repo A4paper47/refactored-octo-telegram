@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+  <div>
+    <h2 style="margin:0;">VO workload — {{ vo_name }}</h2>
+    <div class="muted" style="margin-top:6px;">Across all movies/projects.</div>
+  </div>
+  <div class="row" style="gap:10px; flex-wrap:wrap;">
+    <a class="btn" href="{{ url_for('dashboard') }}">Back</a>
+    <a class="btn" href="{{ url_for('workload_vo') }}?name={{ vo_name|urlencode }}">Show all</a>
+    <a class="btn" href="{{ url_for('workload_vo') }}?name={{ vo_name|urlencode }}&show=pending">Show pending</a>
+    <a class="btn" href="{{ url_for('workload_vo') }}?name={{ vo_name|urlencode }}&show=overdue">Show overdue</a>
+  </div>
+</div>
+
+<div class="grid" style="grid-template-columns: repeat(6, minmax(0,1fr)); gap:12px; margin-top:14px;">
+  <div class="card"><div class="muted">Total roles</div><div class="big" style="font-size:28px;">{{ summary.total_roles }}</div></div>
+  <div class="card"><div class="muted">Pending roles</div><div class="big" style="font-size:28px;">{{ summary.pending_roles }}</div></div>
+  <div class="card"><div class="muted">Late roles</div><div class="big" style="font-size:28px;">{{ summary.late_roles }}</div></div>
+  <div class="card"><div class="muted">Total lines</div><div class="big" style="font-size:28px;">{{ summary.total_lines }}</div></div>
+  <div class="card"><div class="muted">Pending lines</div><div class="big" style="font-size:28px;">{{ summary.pending_lines }}</div></div>
+  <div class="card"><div class="muted">Late lines</div><div class="big" style="font-size:28px;">{{ summary.late_lines }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <div class="table-wrap wide">
+    <table>
+      <thead>
+        <tr>
+          <th>Movie/Project</th>
+          <th>Role</th>
+          <th>Lines</th>
+          <th>Deadline (MYT)</th>
+          <th>Status</th>
+          <th>Submitted (UTC)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>
+              <b>{{ r.project }}</b>
+              {% if r.movie_display %}
+                <div class="muted" style="margin-top:4px;">{{ r.movie_display }}</div>
+              {% endif %}
+            </td>
+            <td><code>{{ r.role }}</code></td>
+            <td>{{ r.lines }}</td>
+            <td>{{ r.deadline_myt or '-' }}</td>
+            <td>
+              {% if r.done %}
+                <span class="badge done">DONE</span>
+              {% elif r.late %}
+                <span class="badge late">OVERDUE</span>
+              {% else %}
+                <span class="badge ready">PENDING</span>
+              {% endif %}
+            </td>
+            <td>{{ r.submitted_at or '-' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

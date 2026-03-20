@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+{% set req = row.req %}
+<h1>Role Import Detail</h1>
+<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+  <a class="btn btn-secondary" href="{{ url_for('role_imports_panel', status=status, q=q, limit=limit) }}">← Back to list</a>
+  {% if req.status == 'PENDING' %}
+  <form method="post" action="{{ url_for('role_imports_run') }}">
+    <input type="hidden" name="req_id" value="{{ req.id }}">
+    <input type="hidden" name="action" value="refresh">
+    <input type="hidden" name="status" value="{{ status }}">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="limit" value="{{ limit }}">
+    <input type="hidden" name="redirect_to" value="detail">
+    <button class="btn btn-secondary" type="submit">Refresh suggestions</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom:14px;">
+  <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0 0 6px 0;">#{{ req.id }} • {{ row.movie_label }}</h2>
+      <div class="muted">Status: {{ req.status }} • Group: {{ req.tg_chat_id or '-' }}</div>
+      <div class="muted">Requested by: {{ req.requested_by_name or req.requested_by_tg_id or '-' }}</div>
+      <div class="muted">Created: {{ req.created_at.strftime('%Y-%m-%d %H:%M UTC') if req.created_at else '-' }} • Expires: {{ req.expires_at.strftime('%Y-%m-%d %H:%M UTC') if req.expires_at else '-' }}</div>
+      <div class="muted">Existing movie: {{ row.existing_movie.code if row.existing_movie else '(new movie)' }}</div>
+      {% if req.reviewed_at %}
+      <div class="muted">Reviewed by: {{ req.reviewed_by_name or req.reviewed_by_tg_id or '-' }} • {{ req.reviewed_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+      {% endif %}
+    </div>
+    <div class="pill">Roles {{ row.roles_count }} • Lines {{ row.total_lines }} • Assigned {{ row.assigned_count }}/{{ row.suggestions_count }}</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;">
+  <div class="card">
+    <h3 style="margin-top:0;">Suggested assignments</h3>
+    <div class="console">{% for s in row.all_suggestions %}• {{ s.role }} → {{ s.vo }} ({{ s.lines }} lines)
+{% else %}No suggestions{% endfor %}</div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Parsed roles</h3>
+    <div class="console">{% for role, lines in row.roles %}• {{ role }} ({{ lines }} lines)
+{% else %}No parsed roles{% endfor %}</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Raw roles text</h3>
+  <div class="console">{% for ln in row.raw_lines %}{{ ln }}
+{% else %}No raw lines{% endfor %}</div>
+</div>
+
+{% if req.status == 'PENDING' %}
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Actions</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% for mode,label in [('superurgent','Approve 12h'),('urgent','Approve 24h'),('nonurgent','Approve 36h'),('flexible','Approve 48h')] %}
+    <form method="post" action="{{ url_for('role_imports_run') }}">
+      <input type="hidden" name="req_id" value="{{ req.id }}">
+      <input type="hidden" name="action" value="approve">
+      <input type="hidden" name="mode" value="{{ mode }}">
+      <input type="hidden" name="status" value="{{ status }}">
+      <input type="hidden" name="q" value="{{ q }}">
+      <input type="hidden" name="limit" value="{{ limit }}">
+      <input type="hidden" name="redirect_to" value="detail">
+      <button class="btn" type="submit">{{ label }}</button>
+    </form>
+    {% endfor %}
+    <form method="post" action="{{ url_for('role_imports_run') }}" onsubmit="return confirm('Reject this role import request?');">
+      <input type="hidden" name="req_id" value="{{ req.id }}">
+      <input type="hidden" name="action" value="reject">
+      <input type="hidden" name="status" value="{{ status }}">
+      <input type="hidden" name="q" value="{{ q }}">
+      <input type="hidden" name="limit" value="{{ limit }}">
+      <input type="hidden" name="redirect_to" value="detail">
+      <button class="btn btn-secondary" type="submit">Reject</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
