@@ -173,3 +173,54 @@ Sekarang game dah mula rasa macam **management tycoon** betul, bukan sekadar mis
 - `telegram_game/test_db_integration.py` ✅
 - `python -m py_compile telegram_game/*.py` ✅
 - total: **22 passed**
+
+
+## V8 Update — Render Web Service / Webhook Mode
+
+Sekarang game bot dah ada mode khas untuk **Render Web Service**. Ini bermaksud bot tak perlu lagi jalan sebagai polling worker.
+
+### Apa yang ditambah
+
+- fail baru `render_game_web.py`
+- webhook endpoint:
+  - `/health`
+  - `/telegram/webhook/<WEBHOOK_SECRET>`
+  - `/telegram/setup-webhook`
+  - `/telegram/webhook-info`
+  - `/telegram/delete-webhook`
+- `Dockerfile` baru untuk launch:
+  - `gunicorn render_game_web:app --bind 0.0.0.0:$PORT`
+- `render.yaml` blueprint contoh
+- test baru untuk Flask webhook service
+
+### Env yang penting untuk Render
+
+- `BOT_TOKEN`
+- `RENDER_EXTERNAL_URL`
+- `WEBHOOK_SECRET`
+- `TELEGRAM_SECRET_TOKEN`
+- `GAME_USE_DB`
+- `PORT` (default Render biasanya 10000)
+- `WEB_CONCURRENCY=1`
+
+### Cara deploy sebagai Web Service
+
+Bila guna Dockerfile dalam repo ini, start command dah siap dalam image.
+
+Kalau kau set manual start command dalam dashboard, guna ini:
+
+```bash
+sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WEB_CONCURRENCY:-1} --threads 4 --timeout 120'
+```
+
+### Flow lepas deploy
+
+1. pastikan service `Live`
+2. buka `/health`
+3. buka `/telegram/setup-webhook`
+4. lepas webhook set, test `/start` dalam Telegram
+
+### Nota penting
+
+- local JSON save masih sesuai untuk test, tapi pada free web service Render filesystem ialah sementara
+- jadi untuk progression game jangka panjang, lebih elok guna DB/persistent disk bila masuk fasa live sebenar

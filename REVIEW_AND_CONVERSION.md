@@ -337,3 +337,45 @@ Game layer sekarang dah masuk fasa progression sebenar. Bukan setakat pick missi
 - belum ada contract expiry / burnout mendalam
 - belum ada gacha/client reputation/season ladder
 - belum ada visual WebApp board
+
+
+---
+
+## V8 Update — Web Service Fix for Render
+
+Punca utama bot game tak respon di Render sebelum ini ialah architecture mismatch:
+- game bot dijalankan dengan `run_polling()`
+- Render service pula jenis **Web Service** yang perlukan HTTP listener aktif pada port awam
+- `Dockerfile` lama masih launch `gunicorn app:app`, jadi game bot tak pernah start
+
+### Pembetulan yang dibuat
+
+- tambah `render_game_web.py` sebagai entrypoint webhook khusus untuk game bot
+- PTB app game sekarang dihidupkan dalam asyncio loop latar, tapi update masuk melalui **Flask webhook route**
+- tambah route:
+  - `/`
+  - `/health`
+  - `/telegram/webhook/<WEBHOOK_SECRET>`
+  - `/telegram/setup-webhook`
+  - `/telegram/webhook-info`
+  - `/telegram/delete-webhook`
+- `Dockerfile` ditukar supaya bind ke `0.0.0.0:$PORT`
+- tambah `render.yaml` contoh untuk Web Service
+- tambah test baru untuk webhook Flask app
+
+### Kesan praktikal
+
+Sekarang repo ini boleh dideploy sebagai **Render Web Service** dengan cara yang betul untuk Telegram webhook.
+
+Maknanya:
+- Render nampak port HTTP yang valid
+- Telegram boleh POST update ke webhook route
+- `/start`, button callback, dan command game lain boleh diproses dalam Web Service mode
+- tak perlu pakai Background Worker untuk versi ini
+
+### Ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `telegram_game/test_render_web_service.py` ✅
+- `python -m py_compile telegram_game/*.py render_game_web.py` ✅

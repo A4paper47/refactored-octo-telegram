@@ -741,10 +741,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await handler(update, context)
 
 
-def build_game_app() -> Application:
-    if not BOT_TOKEN:
+def build_game_app(token: Optional[str] = None) -> Application:
+    bot_token = (token or BOT_TOKEN or "").strip()
+    if not bot_token:
         raise RuntimeError("Missing BOT_TOKEN")
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(bot_token).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("newgame", cmd_newgame))
     app.add_handler(CommandHandler("mission", cmd_mission))
@@ -771,6 +772,10 @@ def build_game_app() -> Application:
     app.add_handler(CommandHandler("nextday", cmd_nextday))
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^g\|"))
     return app
+
+
+def build_game_application(token: Optional[str] = None) -> Application:
+    return build_game_app(token=token)
 
 
 def main() -> None:

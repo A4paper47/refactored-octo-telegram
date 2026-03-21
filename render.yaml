@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: studio-dub-tycoon-webhook
+    runtime: docker
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: BOT_AUTO_START
+        value: "1"
+      - key: GAME_USE_DB
+        value: "0"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: TELEGRAM_SECRET_TOKEN
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: studio-dub-tycoon-webhook
+          envVarKey: RENDER_EXTERNAL_URL
