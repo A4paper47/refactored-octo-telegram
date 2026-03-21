@@ -4,6 +4,8 @@ import tempfile
 from telegram_game.game_engine import (
     accept_mission,
     auto_cast,
+    bench_summary,
+    current_team_summary,
     ensure_mission,
     load_state,
     new_game,
@@ -57,3 +59,23 @@ def test_save_and_load_roundtrip():
     assert loaded.studio_name == state.studio_name
     assert loaded.current_mission is not None
     assert loaded.current_mission.code == state.current_mission.code
+
+
+def test_team_summary_shows_assigned_staff():
+    state = new_game(777, "Team Studio")
+    accept_mission(state)
+    auto_cast(state)
+    text = current_team_summary(state)
+    assert "Team untuk mission" in text
+    assert "Translator:" in text
+    assert "Staff on mission:" in text
+
+
+def test_bench_summary_excludes_current_assignees():
+    state = new_game(888, "Bench Studio")
+    mission = ensure_mission(state)
+    auto_cast(state)
+    text = bench_summary(state)
+    assert f"Bench untuk mission {mission.code}" in text
+    if mission.assigned_translator:
+        assert mission.assigned_translator not in text

@@ -210,3 +210,29 @@ def test_load_specific_db_mission_into_state_picks_requested_code():
         assert mission.title == "Golden Signal"
         assert state.current_mission is not None
         assert state.current_mission.code == "MS-260320-02"
+
+
+def test_list_db_missions_can_filter_by_status():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(889, "Hybrid Studio")
+        items = list_db_missions(state, limit=8, database_url=db_url, status="NEW")
+        assert items
+        assert all((item["status"] or "").upper() == "NEW" for item in items)
+        assert items[0]["code"] == "MS-260320-02"
+
+
+def test_list_db_missions_can_filter_by_translator():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(890, "Hybrid Studio")
+        items = list_db_missions(state, limit=8, database_url=db_url, translator="Sumi")
+        assert items
+        assert all((item["translator"] or "").lower() == "sumi" for item in items)
+        assert items[0]["code"] == "MS-260320-02"

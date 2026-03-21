@@ -4,7 +4,6 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 import json
-import math
 import random
 
 PRIORITY_DEADLINES = {
@@ -208,8 +207,6 @@ def assign_role(state: GameState, role_name: str, staff_name: str) -> str:
     return member.name
 
 
-
-
 def clear_assignments(state: GameState) -> Mission:
     mission = ensure_mission(state)
     mission.assigned_translator = None
@@ -313,12 +310,57 @@ def next_day(state: GameState) -> None:
     state.log.append(f"Hari {state.day} bermula.")
 
 
+def _assigned_staff_names(mission: Mission) -> set[str]:
+    names = set(mission.assigned_roles.values())
+    if mission.assigned_translator:
+        names.add(mission.assigned_translator)
+    return names
+
+
 def roster_summary(state: GameState) -> str:
     lines = [f"🏢 {state.studio_name} — Day {state.day} — Coins {state.coins} — XP {state.xp} — Level {state.level()}"]
     for kind, label in [("translator", "Translator"), ("male", "VO Male"), ("female", "VO Female")]:
         lines.append(f"\n{label}:")
         for member in [s for s in state.roster if s.role_type == kind]:
             lines.append(f"- {member.name}: skill {member.skill}, speed {member.speed}, energy {member.energy}, lvl {member.level}")
+    return "\n".join(lines)
+
+
+def current_team_summary(state: GameState) -> str:
+    mission = ensure_mission(state)
+    lines = [f"🎯 Team untuk mission {mission.code} — {mission.title}"]
+    lines.append(f"Translator: {mission.assigned_translator or '-'}")
+    for role in mission.roles:
+        lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')}")
+    assigned_names = _assigned_staff_names(mission)
+    if assigned_names:
+        lines.append("")
+        lines.append("Staff on mission:")
+        for member in sorted((s for s in state.roster if s.name in assigned_names), key=lambda s: (s.role_type, s.name.lower())):
+            lines.append(
+                f"- {member.name} [{member.role_type}] power {round(member.power(), 1)} | energy {member.energy} | lvl {member.level}"
+            )
+    else:
+        lines.append("")
+        lines.append("Belum ada staff assign lagi.")
+    return "\n".join(lines)
+
+
+def bench_summary(state: GameState) -> str:
+    mission = ensure_mission(state)
+    assigned_names = _assigned_staff_names(mission)
+    lines = [f"🪑 Bench untuk mission {mission.code}"]
+    for kind, label in [("translator", "Translator bench"), ("male", "VO Male bench"), ("female", "VO Female bench")]:
+        lines.append(f"\n{label}:")
+        bench = [s for s in state.roster if s.role_type == kind and s.name not in assigned_names]
+        if not bench:
+            lines.append("- kosong")
+            continue
+        bench = sorted(bench, key=lambda s: (s.energy, s.power(), s.level), reverse=True)
+        for member in bench:
+            lines.append(
+                f"- {member.name}: power {round(member.power(), 1)}, skill {member.skill}, speed {member.speed}, energy {member.energy}, lvl {member.level}"
+            )
     return "\n".join(lines)
 
 

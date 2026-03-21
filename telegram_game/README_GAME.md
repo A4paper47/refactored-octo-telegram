@@ -31,7 +31,7 @@ Versi game:
 - `/newgame [studio name]`
 - `/mission`
 - `/dbmission` → force load mission daripada DB sebenar
-- `/missions` → senarai mission aktif dari DB
+- `/missions [status=...] [translator=...]` → senarai mission aktif dari DB + filter
 - `/pick <code>` → pilih mission tertentu dari DB
 - `/syncdb` → sync translator + VO roster daripada DB sebenar
 - `/accept`
@@ -39,6 +39,8 @@ Versi game:
 - `/assigntr <nama>`
 - `/assign <role> <nama>`
 - `/clearcast`
+- `/team` → tengok team mission semasa
+- `/bench` → tengok staff available / belum assign
 - `/submit`
 - `/roster`
 - `/status`
@@ -70,11 +72,18 @@ Bila `GAME_USE_DB=1` dan `DATABASE_URL` tersedia:
 - `/syncdb` akan tarik `translator` + `vo_team` jadi roster game
 - `/dbmission` akan bina mission daripada `movie` + `assignment` + `translation_task`
 - `/missions` akan paparkan shortlist mission DB yang boleh diuji
+- `/missions status=NEW` atau `/missions translator=Ryan` boleh tapis mission
 - `/pick <code>` akan load project tertentu terus ke state game
 - assignment sedia ada dalam DB akan terus dipaparkan sebagai cast awal
 - translator assigned sedia ada akan dibaca sebagai assigned translator untuk mission
 - `/assigntr`, `/assign`, `/clearcast`, dan `/autocast` akan sync balik assignment ke DB bila mission datang dari DB
 - `/submit` akan write-back ke `movie`, `translation_task`, `assignment`, `movie_event`, dan `vo_role_submission`
+
+## UI Telegram semasa
+
+- main menu inline button
+- inline mission pick button dari senarai `/missions`
+- team view dan bench view untuk tengok siapa sedang bermain dan siapa masih available
 
 ## Kenapa format ini dipilih
 
@@ -99,13 +108,17 @@ Sudah siap:
 - roster persistence (JSON save per user)
 - DB roster sync
 - DB-backed mission import
-- automated tests untuk engine + DB integration
 - DB write-back untuk assignment dan submission
 - manual cast commands
 - DB mission listing + explicit mission pick by code
+- mission filtering by status / translator
+- inline pick buttons
+- team / bench view
+- automated tests untuk engine + DB integration
 
 Belum siap:
 - shop / upgrade / rarity system
+- `assign_logic.py` heuristic penuh
 - Telegram Web App / HTML5 UI
 
 ## Cadangan fasa seterusnya
@@ -113,5 +126,5 @@ Belum siap:
 1. Sambung dengan `assign_logic.py` untuk auto-cast yang lebih real ikut level/speed sebenar.
 2. Tambah progression layer: hire, unlock, upgrade, burnout, premium clients.
 3. Tambah leaderboard / season progression.
-4. Sambung heuristic penuh dari `assign_logic.py`.
+4. Tambah paging untuk mission list yang panjang.
 5. Bila loop dah solid, baru naikkan ke Telegram Web App / HTML5.

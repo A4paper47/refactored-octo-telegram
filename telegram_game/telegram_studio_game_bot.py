@@ -21,7 +21,9 @@ from telegram_game.game_engine import (
     assign_role,
     assign_translator,
     auto_cast,
+    bench_summary,
     clear_assignments,
+    current_team_summary,
     ensure_mission,
     latest_log,
     load_state,
@@ -108,7 +110,8 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("✅ Accept", callback_data="g|accept")],
         [InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
-        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("👥 Roster", callback_data="g|roster")],
+        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench")],
+        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("👤 Roster", callback_data="g|roster")],
         [InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
 
@@ -121,7 +124,7 @@ def _help_text() -> str:
         "/newgame — reset studio\n"
         "/mission — tengok misi\n"
         "/dbmission — paksa load mission dari DB\n"
-        "/missions — senarai mission aktif dari DB\n"
+        "/missions [status=...] [translator=...] — senarai mission aktif dari DB\n"
         "/pick <code> — pilih mission tertentu dari DB\n"
         "/syncdb — sync translator/VO dari DB\n"
         "/accept — terima misi\n"
@@ -129,21 +132,83 @@ def _help_text() -> str:
         "/assigntr <nama> — assign translator manual\n"
         "/assign <role> <nama> — assign VO manual\n"
         "/clearcast — clear semua assignment semasa\n"
+        "/team — tengok team mission semasa\n"
+        "/bench — tengok staff available\n"
         "/submit — hantar ke QA\n"
-        "/roster — tengok staff\n"
+        "/roster — tengok semua staff\n"
         "/nextday — maju hari\n"
         "/status — ringkasan studio"
     )
 
 
-def _missions_text(items: list[dict]) -> str:
+def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str]]:
+    status: Optional[str] = None
+    translator_parts: list[str] = []
+    mode: Optional[str] = None
+
+    for raw in args:
+        token = raw.strip()
+        if not token:
+            continue
+        lower = token.lower()
+        if lower.startswith("status="):
+            status = token.split("=", 1)[1].strip() or None
+            mode = None
+            continue
+        if lower.startswith("translator="):
+            value = token.split("=", 1)[1].strip()
+            translator_parts = [value] if value else []
+            mode = "translator"
+            continue
+        if lower == "translator":
+            translator_parts = []
+            mode = "translator"
+            continue
+        if lower == "status":
+            mode = "status"
+            continue
+        if mode == "translator":
+            translator_parts.append(token)
+        elif mode == "status" and status is None:
+            status = token
+        elif status is None and lower.replace("_", "").replace("-", "") in {"new", "pending", "inprogress", "completed", "ready", "active"}:
+            status = token
+        else:
+            translator_parts.append(token)
+
+    translator = " ".join(part for part in translator_parts if part).strip() or None
+    return status, translator
+
+
+def _mission_pick_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for item in items[:8]:
+        code = str(item["code"])
+        title = str(item["title"])
+        label = f"🎯 {code}"
+        if len(title) <= 18:
+            label += f" · {title}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"g|pick|{code}")])
+    rows.append([InlineKeyboardButton("⬅️ Menu", callback_data="g|mission")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _missions_text(items: list[dict], status: Optional[str] = None, translator: Optional[str] = None) -> str:
+    filters = []
+    if status:
+        filters.append(f"status={status}")
+    if translator:
+        filters.append(f"translator={translator}")
+    header = "📚 DB mission list"
+    if filters:
+        header += f" ({', '.join(filters)})"
     if not items:
-        return "❌ Tiada mission aktif dijumpai dalam DB."
-    lines = ["📚 DB mission list", "Guna /pick <code> untuk pilih mission tertentu.", ""]
+        return f"{header}\n\n❌ Tiada mission sepadan dijumpai dalam DB."
+    lines = [header, "Pilih dengan button di bawah atau guna /pick <code>.", ""]
     for item in items:
         lines.append(
-            f"- {item['code']} | {item['title']} | {item['priority']} | roles {item['role_count']} | "
-            f"lines {item['total_lines']} | translator {item['translator']}"
+            f"- {item['code']} | {item['title']} | status {item['status']} | {item['priority']} | "
+            f"roles {item['role_count']} | lines {item['total_lines']} | translator {item['translator']}"
         )
     return "\n".join(lines)
 
@@ -202,13 +267,16 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
+    status, translator = _parse_mission_filters(context.args)
     try:
-        items = list_db_missions(state, limit=8)
-        text = _missions_text(items)
+        items = list_db_missions(state, limit=8, status=status, translator=translator)
+        text = _missions_text(items, status=status, translator=translator)
+        markup = _mission_pick_keyboard(items) if items else _menu()
     except Exception as exc:
         text = f"❌ Tak dapat ambil list mission DB: {exc}"
+        markup = _menu()
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -345,6 +413,20 @@ async def cmd_roster(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(roster_summary(state), reply_markup=_menu())
 
 
+async def cmd_team(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    _save(state)
+    await update.effective_message.reply_text(current_team_summary(state), reply_markup=_menu())
+
+
+async def cmd_bench(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    _save(state)
+    await update.effective_message.reply_text(bench_summary(state), reply_markup=_menu())
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
@@ -375,7 +457,8 @@ async def cmd_nextday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    action = (query.data or "").split("|", 1)[-1]
+    raw = query.data or ""
+    parts = raw.split("|")
 
     class _Msg:
         async def reply_text(self2, *args, **kwargs):
@@ -383,6 +466,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     update.effective_message = _Msg()  # type: ignore[attr-defined]
 
+    if len(parts) >= 3 and parts[1] == "pick":
+        context.args = ["|".join(parts[2:])]  # type: ignore[attr-defined]
+        await cmd_pick(update, context)
+        return
+
+    action = parts[1] if len(parts) > 1 else ""
     mapping = {
         "mission": cmd_mission,
         "dbmission": cmd_dbmission,
@@ -392,6 +481,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "autocast": cmd_autocast,
         "submit": cmd_submit,
         "roster": cmd_roster,
+        "team": cmd_team,
+        "bench": cmd_bench,
         "log": cmd_log,
         "nextday": cmd_nextday,
     }
@@ -418,6 +509,8 @@ def build_game_app() -> Application:
     app.add_handler(CommandHandler("clearcast", cmd_clearcast))
     app.add_handler(CommandHandler("submit", cmd_submit))
     app.add_handler(CommandHandler("roster", cmd_roster))
+    app.add_handler(CommandHandler("team", cmd_team))
+    app.add_handler(CommandHandler("bench", cmd_bench))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("log", cmd_log))
     app.add_handler(CommandHandler("nextday", cmd_nextday))

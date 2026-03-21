@@ -204,3 +204,52 @@ Sebelum deploy live, kau dah boleh:
 - button pick terus dari inline list belum dibuat
 - belum integrate heuristic penuh dari `assign_logic.py`
 - belum ada WebApp/game canvas
+
+
+---
+
+## V5 Update — Filtered Mission List + Inline Pick + Team/Bench View
+
+Sekarang bot lebih sedap untuk pre-live test sebab browsing mission dan semak roster semasa dah jauh lebih jelas.
+
+### Apa yang ditambah
+
+- `/missions [status=...] [translator=...]`
+  - boleh tapis ikut status movie
+  - boleh tapis ikut translator assigned
+- inline button terus pada senarai mission
+  - klik terus untuk pick project
+- command baru:
+  - `/team`
+  - `/bench`
+- view baru:
+  - team mission semasa
+  - bench staff yang belum digunakan
+- test coverage baru untuk:
+  - filter mission ikut status
+  - filter mission ikut translator
+  - team summary
+  - bench summary
+
+### Kegunaan praktikal
+
+Sebelum live, kau dah boleh:
+- cari project yang betul-betul nak diuji, bukan scroll manual semua
+- tapis project ikut translator tertentu
+- tengok siapa dah masuk mission semasa
+- tengok siapa masih available atas bench sebelum assign manual
+- pick mission terus dengan button tanpa perlu copy-paste code setiap kali
+
+### Status ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `python -m py_compile telegram_game/*.py` ✅
+- total: **14 passed**
+
+### Limit semasa
+
+- belum ada paging untuk mission list panjang
+- belum ada filter ikut priority / lang / deadline
+- belum integrate heuristic penuh dari `assign_logic.py`
+- belum ada WebApp/game canvas

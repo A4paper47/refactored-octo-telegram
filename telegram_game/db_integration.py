@@ -244,7 +244,54 @@ def _movie_score(movie: Movie) -> Tuple[int, int, int, int, int]:
     return (movie_weight, task_weight, active_tasks, has_cast, recency)
 
 
-def list_db_movie_candidates(limit: int = 8) -> List[Movie]:
+def _normalize_status_filter(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip().upper()
+    if not raw:
+        return None
+    aliases = {
+        "ACTIVE": "IN_PROGRESS",
+        "INPROGRESS": "IN_PROGRESS",
+        "PROGRESS": "IN_PROGRESS",
+        "PENDING": "PENDING",
+        "NEW": "NEW",
+        "READY": "READY",
+        "DONE": "COMPLETED",
+        "COMPLETE": "COMPLETED",
+        "COMPLETED": "COMPLETED",
+    }
+    return aliases.get(raw, raw)
+
+
+def _movie_matches_filters(movie: Movie, status: Optional[str], translator: Optional[str]) -> bool:
+    status_filter = _normalize_status_filter(status)
+    translator_filter = (translator or "").strip().lower()
+
+    if status_filter:
+        movie_status = ((movie.status or "").strip().upper() or "NEW")
+        if movie_status != status_filter:
+            return False
+
+    if translator_filter:
+        movie_translator = (movie.translator_assigned or "").strip().lower()
+        task_match = (
+            db.session.query(TranslationTask.id)
+            .filter(
+                or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code),
+                func.lower(func.coalesce(TranslationTask.translator_name, "")) == translator_filter,
+            )
+            .first()
+        )
+        if movie_translator != translator_filter and task_match is None:
+            return False
+
+    return True
+
+
+def list_db_movie_candidates(
+    limit: int = 8,
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+) -> List[Movie]:
     candidates = (
         Movie.query.filter(ACTIVE_MOVIE_EXPR)
         .filter(Movie.status != "ARCHIVED")
@@ -253,12 +300,13 @@ def list_db_movie_candidates(limit: int = 8) -> List[Movie]:
     )
     if not candidates:
         return []
-    ranked = sorted(candidates, key=_movie_score, reverse=True)
+    filtered = [movie for movie in candidates if _movie_matches_filters(movie, status=status, translator=translator)]
+    ranked = sorted(filtered, key=_movie_score, reverse=True)
     return ranked[: max(1, limit)]
 
 
-def _pick_movie_candidate() -> Optional[Movie]:
-    candidates = list_db_movie_candidates(limit=1)
+def _pick_movie_candidate(status: Optional[str] = None, translator: Optional[str] = None) -> Optional[Movie]:
+    candidates = list_db_movie_candidates(limit=1, status=status, translator=translator)
     return candidates[0] if candidates else None
 
 
@@ -353,9 +401,14 @@ def _build_mission_from_movie(
     )
 
 
-def build_mission_from_db(state: GameState, database_url: Optional[str] = None) -> Optional[Mission]:
+def build_mission_from_db(
+    state: GameState,
+    database_url: Optional[str] = None,
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+) -> Optional[Mission]:
     with game_db_context(database_url):
-        movie = _pick_movie_candidate()
+        movie = _pick_movie_candidate(status=status, translator=translator)
         if not movie:
             return None
 
@@ -375,9 +428,18 @@ def build_mission_from_db(state: GameState, database_url: Optional[str] = None) 
         return _build_mission_from_movie(state, movie, assignments, tasks, priority, deadlines)
 
 
-def list_db_missions(state: GameState, limit: int = 8, database_url: Optional[str] = None) -> List[Dict[str, object]]:
+def list_db_missions(
+    state: GameState,
+    limit: int = 8,
+    database_url: Optional[str] = None,
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+) -> List[Dict[str, object]]:
     with game_db_context(database_url):
-        return [_build_candidate_info(movie, state) for movie in list_db_movie_candidates(limit=limit)]
+        return [
+            _build_candidate_info(movie, state)
+            for movie in list_db_movie_candidates(limit=limit, status=status, translator=translator)
+        ]
 
 
 def build_mission_from_movie_code(
