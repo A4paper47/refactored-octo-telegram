@@ -302,3 +302,38 @@ Sebelum live, kau dah boleh:
 - belum ada economy layer penuh (hire, fire, unlock, upgrade)
 - belum ada WebApp/game canvas
 
+
+
+## V7 Update — Recruitment Market + Studio Economy + Upgrades
+
+Game layer sekarang dah masuk fasa progression sebenar. Bukan setakat pick mission dan submit, tapi dah ada **economy loop** untuk pertumbuhan studio.
+
+### Apa yang ditambah
+
+- recruitment market berasaskan hari + studio tier
+- hire / fire staff
+- payroll harian
+- studio tier expansion
+- upgrade berasingan untuk translator lab, VO booth, dan lounge
+- save/load state sekarang simpan market, studio tier, dan upgrade level
+
+### Kesan kepada gameplay
+
+- player kena urus bajet, bukan cuma cast terbaik setiap kali
+- roster besar beri fleksibiliti, tapi payroll naik
+- expansion bagi market lebih besar dan recruit lebih kuat
+- upgrade translator/VO/lounge beri growth jangka panjang
+
+### Status ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `python -m py_compile telegram_game/*.py` ✅
+- total: **22 passed**
+
+### Limit semasa
+
+- belum ada rarity/trait unik per staff
+- belum ada contract expiry / burnout mendalam
+- belum ada gacha/client reputation/season ladder
+- belum ada visual WebApp board

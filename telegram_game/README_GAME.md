@@ -43,6 +43,11 @@ Versi game:
 - `/bench` → tengok staff available / belum assign
 - `/submit`
 - `/roster`
+- `/market`
+- `/hire <nama>`
+- `/fire <nama>`
+- `/studio`
+- `/upgrade <studio|translator|vo|lounge>`
 - `/status`
 - `/log`
 - `/nextday`
@@ -86,6 +91,8 @@ Bila `GAME_USE_DB=1` dan `DATABASE_URL` tersedia:
 - inline mission pick button dari senarai `/missions`
 - inline paging button Prev / Next untuk mission list panjang
 - team view dan bench view untuk tengok siapa sedang bermain dan siapa masih available
+- recruitment market untuk hire staff baru
+- studio view untuk economy, payroll, dan kos upgrade
 
 ## Kenapa format ini dipilih
 
@@ -118,10 +125,12 @@ Sudah siap:
 - inline pick buttons + Prev / Next paging
 - team / bench view
 - DB-aware auto-cast guna heuristic dari `assign_logic.py` untuk pilih VO lebih real
+- recruitment market / hire / fire
+- studio tier, payroll economy, dan upgrade system
 - automated tests untuk engine + DB integration
 
 Belum siap:
-- shop / upgrade / rarity system
+- rarity / trait system yang lebih dalam
 - WebApp / mission board yang lebih visual
 - leaderboard / progression layer yang penuh
 - Telegram Web App / HTML5 UI
@@ -133,3 +142,34 @@ Belum siap:
 3. Tambah leaderboard / season progression.
 4. Tambah mode co-op / guild untuk satu project dimainkan ramai user.
 5. Bila loop dah solid, baru naikkan ke Telegram Web App / HTML5.
+
+
+## V7 Update — Recruitment Market + Studio Economy + Upgrades
+
+Sekarang game dah mula rasa macam **management tycoon** betul, bukan sekadar mission runner.
+
+### Apa yang ditambah
+
+- `/market` untuk tengok calon recruit baru
+- `/hire <nama>` untuk ambil staff dari market
+- `/fire <nama>` untuk buang staff yang tak diperlukan
+- `/studio` untuk tengok studio tier, payroll, dan kos upgrade
+- `/upgrade <studio|translator|vo|lounge>` untuk kuatkan studio
+- payroll harian bila `/nextday`
+- market refresh automatik setiap hari
+- studio tier yang mempengaruhi saiz dan kualiti market
+
+### Kegunaan praktikal
+
+- sebelum live, kau dah boleh test loop ekonomi sebenar
+- boleh rasa beza antara roster kecil vs roster besar
+- boleh hire staff khusus ikut keperluan mission
+- boleh simpan coins untuk expansion atau upgrade fokus
+- boleh simulate growth studio, bukan sekadar assign dan submit
+
+### Status ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `python -m py_compile telegram_game/*.py` ✅
+- total: **22 passed**

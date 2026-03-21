@@ -26,14 +26,19 @@ from telegram_game.game_engine import (
     clear_assignments,
     current_team_summary,
     ensure_mission,
+    fire_staff,
+    hire_staff,
     latest_log,
     load_state,
+    market_summary,
     mission_summary,
     new_game,
     next_day,
     resolve_submission,
     roster_summary,
     save_state,
+    studio_summary,
+    upgrade_studio,
 )
 
 log = logging.getLogger(__name__)
@@ -112,6 +117,7 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
         [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench")],
+        [InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🏢 Studio", callback_data="g|studio")],
         [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("👤 Roster", callback_data="g|roster")],
         [InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
@@ -120,7 +126,7 @@ def _menu() -> InlineKeyboardMarkup:
 def _help_text() -> str:
     return (
         "Game ni tukar workflow asal Web VO Tracker jadi management sim dalam Telegram:\n"
-        "project → translator → VO cast → QA → reward.\n\n"
+        "project → translator → VO cast → QA → reward → growth studio.\n\n"
         "Command utama:\n"
         "/newgame — reset studio\n"
         "/mission — tengok misi\n"
@@ -135,6 +141,11 @@ def _help_text() -> str:
         "/clearcast — clear semua assignment semasa\n"
         "/team — tengok team mission semasa\n"
         "/bench — tengok staff available\n"
+        "/market — recruitment market\n"
+        "/hire <nama> — ambil staff baru dari market\n"
+        "/fire <nama> — buang staff\n"
+        "/studio — status studio + kos upgrade\n"
+        "/upgrade <studio|translator|vo|lounge> — beli upgrade\n"
         "/submit — hantar ke QA\n"
         "/roster — tengok semua staff\n"
         "/nextday — maju hari\n"
@@ -339,38 +350,32 @@ def _missions_text(
     header = "📚 DB mission list"
     if filters:
         header += f" ({', '.join(filters)})"
+    header += f"\nPage {page}/{max(1, total_pages)}"
     if total is not None:
-        header += f"\nPage {page}/{total_pages} | total {total}"
+        header += f" — total {total}"
     if not items:
-        return f"{header}\n\n❌ Tiada mission sepadan dijumpai dalam DB."
-    lines = [header, "Pilih dengan button di bawah atau guna /pick <code>.", ""]
+        return header + "\n\n- Tiada mission jumpa."
+    lines = [header, ""]
     for item in items:
         lines.append(
-            f"- {item['code']} | {item['title']} | {str(item.get('lang', '-')).upper()} | status {item['status']} | {item['priority']} | "
-            f"roles {item['role_count']} | lines {item['total_lines']} | translator {item['translator']}"
+            f"- {item['code']} | {item['title']} | {item.get('lang', '-')} | {item.get('priority', '-')} | {item.get('status', '-')} | TR: {item.get('translator') or '-'}"
         )
     return "\n".join(lines)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    state = _load_or_create(user.id)
-    stats = _sync_if_possible(state)
-    text = (
-        f"🎮 Selamat datang ke *Studio Dub Tycoon*, {user.first_name or 'Player'}!\n\n"
-        f"Mode: *{_mode_label()}*\n"
-        f"{_help_text()}"
-    )
-    if stats:
-        text += f"\n\nSync DB awal: {stats['translator']} translator, {stats['male']} male VO, {stats['female']} female VO"
-    await update.effective_message.reply_text(text, reply_markup=_menu(), parse_mode="Markdown")
+    state = _load_or_create(update.effective_user.id)
     _save(state)
+    await update.effective_message.reply_text(
+        f"🎮 *Studio Dub Tycoon*\nMode: *{_mode_label()}*\n\n{_help_text()}",
+        parse_mode="Markdown",
+        reply_markup=_menu(),
+    )
 
 
 async def cmd_newgame(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    studio_name = " ".join(context.args).strip() or f"{user.first_name or 'Player'} Studio"
-    state = new_game(user_id=user.id, studio_name=studio_name)
+    studio_name = " ".join(context.args).strip() or "Studio Baru"
+    state = new_game(update.effective_user.id, studio_name)
     stats = _sync_if_possible(state)
     _save(state)
     extra = ""
@@ -444,6 +449,7 @@ async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     _save(state)
     await update.effective_message.reply_text(text, reply_markup=markup)
 
+
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     code = " ".join(context.args).strip()
@@ -505,6 +511,7 @@ async def cmd_autocast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         text = f"❌ Auto cast gagal: {exc}"
     _save(state)
     await update.effective_message.reply_text(text, reply_markup=_menu())
+
 
 async def cmd_assigntr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
@@ -598,6 +605,69 @@ async def cmd_bench(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(bench_summary(state), reply_markup=_menu())
 
 
+async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(market_summary(state), reply_markup=_menu())
+
+
+async def cmd_hire(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    name = " ".join(context.args).strip()
+    if not name:
+        text = "Usage: /hire <nama staff dalam market>"
+    else:
+        try:
+            member = hire_staff(state, name)
+            text = (
+                f"✅ Hire berjaya: {member.name}\n"
+                f"Role: {member.role_type}\n"
+                f"Hire cost: {member.hire_cost}\n"
+                f"Salary/day: {member.salary}\n"
+                f"Coins sekarang: {state.coins}"
+            )
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_fire(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    name = " ".join(context.args).strip()
+    if not name:
+        text = "Usage: /fire <nama staff>"
+    else:
+        try:
+            member = fire_staff(state, name)
+            text = f"🗑️ Staff dibuang: {member.name} [{member.role_type}]"
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_studio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(studio_summary(state), reply_markup=_menu())
+
+
+async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    target = " ".join(context.args).strip().lower()
+    if not target:
+        text = "Usage: /upgrade <studio|translator|vo|lounge>"
+    else:
+        try:
+            info = upgrade_studio(state, target)
+            text = f"⬆️ Upgrade berjaya: {info['target']} → lvl {info['level']} (cost {info['cost']})"
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
@@ -605,6 +675,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"🏢 {state.studio_name}\n"
         f"Mode: {_mode_label()}\n"
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()}\n"
+        f"Studio tier {state.studio_tier}\n"
         f"Wins {state.wins} | Losses {state.losses}\n\n"
         f"Current mission:\n{mission.title} ({mission.code})\n"
         f"Mission source: {mission.source}"
@@ -622,7 +693,7 @@ async def cmd_nextday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     state = _load_or_create(update.effective_user.id)
     next_day(state)
     _save(state)
-    await update.effective_message.reply_text(f"⏭️ Masuk hari {state.day}.", reply_markup=_menu())
+    await update.effective_message.reply_text(f"⏭️ Masuk hari {state.day}. Market dan payroll dah update.", reply_markup=_menu())
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -660,12 +731,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "roster": cmd_roster,
         "team": cmd_team,
         "bench": cmd_bench,
+        "market": cmd_market,
+        "studio": cmd_studio,
         "log": cmd_log,
         "nextday": cmd_nextday,
     }
     handler = mapping.get(action)
     if handler:
         await handler(update, context)
+
 
 def build_game_app() -> Application:
     if not BOT_TOKEN:
@@ -687,6 +761,11 @@ def build_game_app() -> Application:
     app.add_handler(CommandHandler("roster", cmd_roster))
     app.add_handler(CommandHandler("team", cmd_team))
     app.add_handler(CommandHandler("bench", cmd_bench))
+    app.add_handler(CommandHandler("market", cmd_market))
+    app.add_handler(CommandHandler("hire", cmd_hire))
+    app.add_handler(CommandHandler("fire", cmd_fire))
+    app.add_handler(CommandHandler("studio", cmd_studio))
+    app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("log", cmd_log))
     app.add_handler(CommandHandler("nextday", cmd_nextday))
