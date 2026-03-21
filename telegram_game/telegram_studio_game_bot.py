@@ -698,15 +698,11 @@ async def cmd_nextday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    if query is None:
+        return
     await query.answer()
     raw = query.data or ""
     parts = raw.split("|")
-
-    class _Msg:
-        async def reply_text(self2, *args, **kwargs):
-            return await query.message.reply_text(*args, **kwargs)
-
-    update.effective_message = _Msg()  # type: ignore[attr-defined]
 
     if len(parts) >= 3 and parts[1] == "pick":
         context.args = ["|".join(parts[2:])]  # type: ignore[attr-defined]
@@ -741,6 +737,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await handler(update, context)
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.exception("Telegram handler error", exc_info=context.error)
+
+
 def build_game_app(token: Optional[str] = None) -> Application:
     bot_token = (token or BOT_TOKEN or "").strip()
     if not bot_token:
@@ -771,6 +771,7 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("log", cmd_log))
     app.add_handler(CommandHandler("nextday", cmd_nextday))
     app.add_handler(CallbackQueryHandler(on_callback, pattern=r"^g\|"))
+    app.add_error_handler(on_error)
     return app
 
 
