@@ -72,7 +72,8 @@ Bila `GAME_USE_DB=1` dan `DATABASE_URL` tersedia:
 - `/syncdb` akan tarik `translator` + `vo_team` jadi roster game
 - `/dbmission` akan bina mission daripada `movie` + `assignment` + `translation_task`
 - `/missions` akan paparkan shortlist mission DB yang boleh diuji
-- `/missions status=NEW` atau `/missions translator=Ryan` boleh tapis mission
+- `/missions status=NEW`, `/missions translator=Ryan`, `/missions priority=urgent`, atau `/missions lang=ms` boleh tapis mission
+- `/missions page=2` boleh browse page seterusnya bila mission banyak
 - `/pick <code>` akan load project tertentu terus ke state game
 - assignment sedia ada dalam DB akan terus dipaparkan sebagai cast awal
 - translator assigned sedia ada akan dibaca sebagai assigned translator untuk mission
@@ -83,6 +84,7 @@ Bila `GAME_USE_DB=1` dan `DATABASE_URL` tersedia:
 
 - main menu inline button
 - inline mission pick button dari senarai `/missions`
+- inline paging button Prev / Next untuk mission list panjang
 - team view dan bench view untuk tengok siapa sedang bermain dan siapa masih available
 
 ## Kenapa format ini dipilih
@@ -111,20 +113,23 @@ Sudah siap:
 - DB write-back untuk assignment dan submission
 - manual cast commands
 - DB mission listing + explicit mission pick by code
-- mission filtering by status / translator
-- inline pick buttons
+- mission filtering by status / translator / priority / lang
+- paging untuk mission list panjang
+- inline pick buttons + Prev / Next paging
 - team / bench view
+- DB-aware auto-cast guna heuristic dari `assign_logic.py` untuk pilih VO lebih real
 - automated tests untuk engine + DB integration
 
 Belum siap:
 - shop / upgrade / rarity system
-- `assign_logic.py` heuristic penuh
+- WebApp / mission board yang lebih visual
+- leaderboard / progression layer yang penuh
 - Telegram Web App / HTML5 UI
 
 ## Cadangan fasa seterusnya
 
-1. Sambung dengan `assign_logic.py` untuk auto-cast yang lebih real ikut level/speed sebenar.
+1. Tambah mission board yang ada sorting / grouping ikut status, priority, lang, deadline.
 2. Tambah progression layer: hire, unlock, upgrade, burnout, premium clients.
 3. Tambah leaderboard / season progression.
-4. Tambah paging untuk mission list yang panjang.
+4. Tambah mode co-op / guild untuk satu project dimainkan ramai user.
 5. Bila loop dah solid, baru naikkan ke Telegram Web App / HTML5.

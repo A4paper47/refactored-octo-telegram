@@ -9,6 +9,7 @@ from flask import Flask
 from db import init_db, db
 from models import Assignment, Movie, MovieEvent, TranslationTask, Translator, VORoleSubmission, VOTeam
 from telegram_game.db_integration import (
+    auto_cast_db_mission,
     build_mission_from_db,
     list_db_missions,
     load_db_roster,
@@ -32,8 +33,11 @@ def _seed_sqlite(db_url: str) -> None:
         db.session.add_all([
             Translator(name="Ryan", active=True, languages="bn,ms,en"),
             Translator(name="Sumi", active=True, languages="bn,ms"),
+            Translator(name="Hana", active=True, languages="ms"),
             VOTeam(name="Ray", gender="male", level="expert_old", speed="normal", urgent_ok=True, active=True),
+            VOTeam(name="Faiz", gender="male", level="trained_new", speed="normal", urgent_ok=True, active=True),
             VOTeam(name="Sara", gender="female", level="trained_new", speed="slow", urgent_ok=True, active=True),
+            VOTeam(name="Ema", gender="female", level="trained_new", speed="normal", urgent_ok=True, active=True),
         ])
         movie = Movie(
             code="BN-260320-01",
@@ -51,7 +55,15 @@ def _seed_sqlite(db_url: str) -> None:
             status="NEW",
             translator_assigned="Sumi",
         )
-        db.session.add_all([movie, movie2])
+        visible_extra_movies = [
+            Movie(code=f"BN-260320-0{i}", title=f"Extra Mission {i}", year="2024", lang="bn", status="NEW")
+            for i in range(3, 7)
+        ]
+        archived_load_movies = [
+            Movie(code=f"ARC-260320-0{i}", title=f"Archived Load {i}", year="2024", lang="bn", status="ARCHIVED")
+            for i in range(7, 10)
+        ]
+        db.session.add_all([movie, movie2, *visible_extra_movies, *archived_load_movies])
         db.session.flush()
         db.session.add_all([
             Assignment(project="BN-260320-01", movie_id=movie.id, vo="Ray", role="man1", lines=120, priority_mode="urgent"),
@@ -61,6 +73,12 @@ def _seed_sqlite(db_url: str) -> None:
             Assignment(project="MS-260320-02", movie_id=movie2.id, vo="Sara", role="fem1", lines=30, priority_mode="flexible"),
             TranslationTask(movie_id=movie2.id, movie_code="MS-260320-02", title="Golden Signal", translator_name="Sumi", status="NEW", priority_mode="flexible"),
         ])
+        # Overload Ray across archived projects so assign_logic.pick_vo deprioritizes him,
+        # while keeping the visible mission list stable for ranking/paging tests.
+        for idx, extra in enumerate(archived_load_movies, start=7):
+            db.session.add(Assignment(project=extra.code, movie_id=extra.id, vo="Ray", role="man1", lines=80 + idx, priority_mode="flexible"))
+            db.session.add(Assignment(project=extra.code, movie_id=extra.id, vo="Sara", role="fem1", lines=50 + idx, priority_mode="flexible"))
+            db.session.add(TranslationTask(movie_id=extra.id, movie_code=extra.code, title=extra.title, translator_name="Ryan", status="SENT", priority_mode="flexible"))
         db.session.commit()
     if previous is None:
         os.environ.pop("DATABASE_URL", None)
@@ -236,3 +254,58 @@ def test_list_db_missions_can_filter_by_translator():
         assert items
         assert all((item["translator"] or "").lower() == "sumi" for item in items)
         assert items[0]["code"] == "MS-260320-02"
+
+def test_list_db_missions_can_filter_by_priority_and_lang():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(891, "Hybrid Studio")
+        urgent_items = list_db_missions(state, limit=8, database_url=db_url, priority="urgent")
+        assert urgent_items
+        assert all((item["priority"] or "").lower() == "urgent" for item in urgent_items)
+        assert urgent_items[0]["code"] == "BN-260320-01"
+
+        ms_items = list_db_missions(state, limit=8, database_url=db_url, lang="ms")
+        assert ms_items
+        assert all((item.get("lang") or "").lower() == "ms" for item in ms_items)
+        assert ms_items[0]["code"] == "MS-260320-02"
+
+
+def test_list_db_missions_supports_paging_meta():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(892, "Hybrid Studio")
+        page1 = list_db_missions(state, limit=2, database_url=db_url, page=1, include_meta=True)
+        page2 = list_db_missions(state, limit=2, database_url=db_url, page=2, include_meta=True)
+        assert page1["total"] >= 4
+        assert page1["total_pages"] >= 2
+        assert page1["page"] == 1
+        assert page2["page"] == 2
+        assert page1["items"]
+        assert page2["items"]
+        assert page1["items"][0]["code"] != page2["items"][0]["code"]
+
+
+def test_auto_cast_db_mission_uses_db_heuristics():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "game.sqlite"
+        db_url = f"sqlite:///{db_path}"
+        _seed_sqlite(db_url)
+
+        state = new_game(893, "Hybrid Studio")
+        sync_state_with_db(state, db_url)
+        mission = load_specific_db_mission_into_state(state, "MS-260320-02", database_url=db_url)
+        assert mission is not None
+
+        picks = auto_cast_db_mission(state, db_url)
+        assert picks["translator"] == "Hana"
+        assert picks["man1"] == "Faiz"
+        assert state.current_mission is not None
+        assert state.current_mission.assigned_translator == "Hana"
+        assert state.current_mission.assigned_roles["man1"] == "Faiz"
+

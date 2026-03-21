@@ -253,3 +253,52 @@ Sebelum live, kau dah boleh:
 - belum ada filter ikut priority / lang / deadline
 - belum integrate heuristic penuh dari `assign_logic.py`
 - belum ada WebApp/game canvas
+
+---
+
+## V6 Update — Paging + Priority/Lang Filter + DB Heuristic Auto-Cast
+
+Sekarang mission browsing dan auto-cast dah lebih hampir kepada operasi sebenar projek asal.
+
+### Apa yang ditambah
+
+- `/missions` kini sokong filter tambahan:
+  - `priority=...`
+  - `lang=...`
+  - `page=...`
+- inline paging button:
+  - `Prev`
+  - `Next`
+- metadata page count pada list mission
+- `db_integration.py` kini ada **DB-aware auto-cast**
+  - translator dipilih ikut language match + workload aktif
+  - VO dipilih menggunakan heuristic dari `assign_logic.py` (`pick_vo`)
+- test coverage baru untuk:
+  - filter priority
+  - filter lang
+  - paging meta
+  - auto-cast DB heuristic
+
+### Kegunaan praktikal
+
+Sebelum live, kau dah boleh:
+- browse mission DB yang banyak tanpa semak satu-satu secara manual
+- tapis project ikut bahasa dan priority sebenar
+- klik next / prev terus dalam Telegram
+- guna auto-cast yang lebih dekat dengan logic operasi asal, bukan random power sahaja
+- elak VO tertentu di-overload bila heuristic DB detect workload tinggi
+
+### Status ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `python -m py_compile telegram_game/*.py` ✅
+- total: **17 passed**
+
+### Limit semasa
+
+- auto-cast translator masih heuristic custom ringan, belum 100% ambil semua business rule asal
+- mission board masih text-based, belum ada UI panel yang lebih visual
+- belum ada economy layer penuh (hire, fire, unlock, upgrade)
+- belum ada WebApp/game canvas
+

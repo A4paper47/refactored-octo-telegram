@@ -8,6 +8,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from flask import Flask
 from sqlalchemy import func, or_
 
+from assign_logic import pick_vo
+
 from db import init_db, db
 from models import (
     Assignment,
@@ -262,9 +264,32 @@ def _normalize_status_filter(value: Optional[str]) -> Optional[str]:
     return aliases.get(raw, raw)
 
 
-def _movie_matches_filters(movie: Movie, status: Optional[str], translator: Optional[str]) -> bool:
+def _movie_priority(movie: Movie) -> str:
+    assignments = _load_assignments_for_movie(movie)
+    tasks = (
+        TranslationTask.query.filter(
+            or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
+        )
+        .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
+        .all()
+    )
+    return _priority_from_text(
+        (tasks[0].priority_mode if tasks else None)
+        or next((a.priority_mode for a in assignments if a.priority_mode), None)
+    )
+
+
+def _movie_matches_filters(
+    movie: Movie,
+    status: Optional[str],
+    translator: Optional[str],
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> bool:
     status_filter = _normalize_status_filter(status)
     translator_filter = (translator or "").strip().lower()
+    priority_filter = _priority_from_text(priority) if (priority or "").strip() else None
+    lang_filter = (lang or "").strip().lower()
 
     if status_filter:
         movie_status = ((movie.status or "").strip().upper() or "NEW")
@@ -284,6 +309,15 @@ def _movie_matches_filters(movie: Movie, status: Optional[str], translator: Opti
         if movie_translator != translator_filter and task_match is None:
             return False
 
+    if priority_filter:
+        if _movie_priority(movie) != priority_filter:
+            return False
+
+    if lang_filter:
+        movie_lang = (movie.lang or "").strip().lower()
+        if movie_lang != lang_filter:
+            return False
+
     return True
 
 
@@ -291,6 +325,9 @@ def list_db_movie_candidates(
     limit: int = 8,
     status: Optional[str] = None,
     translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+    page: int = 1,
 ) -> List[Movie]:
     candidates = (
         Movie.query.filter(ACTIVE_MOVIE_EXPR)
@@ -300,13 +337,47 @@ def list_db_movie_candidates(
     )
     if not candidates:
         return []
-    filtered = [movie for movie in candidates if _movie_matches_filters(movie, status=status, translator=translator)]
+    filtered = [
+        movie
+        for movie in candidates
+        if _movie_matches_filters(movie, status=status, translator=translator, priority=priority, lang=lang)
+    ]
     ranked = sorted(filtered, key=_movie_score, reverse=True)
-    return ranked[: max(1, limit)]
+    safe_limit = max(1, limit)
+    safe_page = max(1, int(page or 1))
+    start = (safe_page - 1) * safe_limit
+    end = start + safe_limit
+    return ranked[start:end]
 
 
-def _pick_movie_candidate(status: Optional[str] = None, translator: Optional[str] = None) -> Optional[Movie]:
-    candidates = list_db_movie_candidates(limit=1, status=status, translator=translator)
+def count_db_movie_candidates(
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> int:
+    candidates = (
+        Movie.query.filter(ACTIVE_MOVIE_EXPR)
+        .filter(Movie.status != "ARCHIVED")
+        .order_by(Movie.updated_at.desc(), Movie.created_at.desc(), Movie.id.desc())
+        .all()
+    )
+    if not candidates:
+        return 0
+    return len([
+        movie
+        for movie in candidates
+        if _movie_matches_filters(movie, status=status, translator=translator, priority=priority, lang=lang)
+    ])
+
+
+def _pick_movie_candidate(
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> Optional[Movie]:
+    candidates = list_db_movie_candidates(limit=1, status=status, translator=translator, priority=priority, lang=lang)
     return candidates[0] if candidates else None
 
 
@@ -339,6 +410,7 @@ def _build_candidate_info(movie: Movie, state: GameState) -> Dict[str, object]:
         "title": mission.title,
         "status": movie.status,
         "priority": mission.priority,
+        "lang": mission.lang,
         "translator": mission.assigned_translator or "-",
         "role_count": len(mission.roles),
         "total_lines": sum(role.lines for role in mission.roles),
@@ -406,9 +478,11 @@ def build_mission_from_db(
     database_url: Optional[str] = None,
     status: Optional[str] = None,
     translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
 ) -> Optional[Mission]:
     with game_db_context(database_url):
-        movie = _pick_movie_candidate(status=status, translator=translator)
+        movie = _pick_movie_candidate(status=status, translator=translator, priority=priority, lang=lang)
         if not movie:
             return None
 
@@ -420,12 +494,12 @@ def build_mission_from_db(
             .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
             .all()
         )
-        priority = _priority_from_text(
+        priority_value = _priority_from_text(
             (tasks[0].priority_mode if tasks else None)
             or next((a.priority_mode for a in assignments if a.priority_mode), None)
         )
         deadlines = [a.deadline_at for a in assignments if a.deadline_at] + [t.deadline_at for t in tasks if t.deadline_at]
-        return _build_mission_from_movie(state, movie, assignments, tasks, priority, deadlines)
+        return _build_mission_from_movie(state, movie, assignments, tasks, priority_value, deadlines)
 
 
 def list_db_missions(
@@ -434,12 +508,38 @@ def list_db_missions(
     database_url: Optional[str] = None,
     status: Optional[str] = None,
     translator: Optional[str] = None,
-) -> List[Dict[str, object]]:
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+    page: int = 1,
+    include_meta: bool = False,
+) -> List[Dict[str, object]] | Dict[str, object]:
     with game_db_context(database_url):
-        return [
+        items = [
             _build_candidate_info(movie, state)
-            for movie in list_db_movie_candidates(limit=limit, status=status, translator=translator)
+            for movie in list_db_movie_candidates(
+                limit=limit,
+                status=status,
+                translator=translator,
+                priority=priority,
+                lang=lang,
+                page=page,
+            )
         ]
+        if not include_meta:
+            return items
+        total = count_db_movie_candidates(status=status, translator=translator, priority=priority, lang=lang)
+        safe_limit = max(1, limit)
+        safe_page = max(1, int(page or 1))
+        total_pages = max(1, (total + safe_limit - 1) // safe_limit) if total else 1
+        return {
+            "items": items,
+            "page": safe_page,
+            "limit": safe_limit,
+            "total": total,
+            "total_pages": total_pages,
+            "has_prev": safe_page > 1,
+            "has_next": safe_page < total_pages,
+        }
 
 
 def build_mission_from_movie_code(
@@ -487,6 +587,91 @@ def load_specific_db_mission_into_state(
     state.current_mission = mission
     state.log.append(f"DB mission picked: {mission.code} — {mission.title}")
     return mission
+
+
+def _translator_language_match(row: Translator, lang: str) -> bool:
+    langs = {(part or "").strip().lower() for part in (row.languages or "").split(",") if part.strip()}
+    return (lang or "").strip().lower() in langs
+
+
+def _pick_best_translator_from_db(mission: Mission, state: GameState) -> Optional[str]:
+    roster_map = {member.name.strip().lower(): member for member in state.roster if member.role_type == "translator"}
+    active_counts: Dict[str, int] = {
+        (name or "").strip().lower(): int(count or 0)
+        for name, count in (
+            db.session.query(TranslationTask.translator_name, func.count(TranslationTask.id))
+            .filter(TranslationTask.status != "COMPLETED")
+            .group_by(TranslationTask.translator_name)
+            .all()
+        )
+    }
+    candidates = Translator.query.filter_by(active=True).order_by(Translator.name.asc()).all()
+    best_name: Optional[str] = None
+    best_score: Optional[float] = None
+    target_lang = (mission.lang or "").strip().lower()
+    for row in candidates:
+        name = _safe_name(row.name, f"Translator-{row.id}")
+        staff = roster_map.get(name.lower())
+        power = staff.power() if staff else 60.0
+        energy_bonus = (staff.energy if staff else 100) * 0.2
+        lang_bonus = 45.0 if _translator_language_match(row, target_lang) else 0.0
+        active_penalty = active_counts.get(name.lower(), 0) * 22.0
+        score = power + energy_bonus + lang_bonus - active_penalty
+        if best_score is None or score > best_score:
+            best_name = name
+            best_score = score
+    return best_name
+
+
+def _vo_load_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
+    load_rows = (
+        db.session.query(Assignment.vo, func.sum(Assignment.lines), func.count(func.distinct(Assignment.project)))
+        .outerjoin(Movie, Assignment.movie_id == Movie.id)
+        .filter(or_(Movie.id.is_(None), Movie.status != "COMPLETED"))
+        .group_by(Assignment.vo)
+        .all()
+    )
+    load: Dict[str, int] = {}
+    project_counts: Dict[str, int] = {}
+    for vo, total_lines, distinct_projects in load_rows:
+        key = (vo or "").strip()
+        if not key:
+            continue
+        load[key] = int(total_lines or 0)
+        project_counts[key] = int(distinct_projects or 0)
+    return load, project_counts
+
+
+def auto_cast_db_mission(state: GameState, database_url: Optional[str] = None) -> Dict[str, str]:
+    mission = state.current_mission
+    if mission is None:
+        raise RuntimeError("Tiada mission aktif untuk auto-cast DB.")
+    if mission.source != "database":
+        raise RuntimeError("DB auto-cast hanya untuk mission yang datang dari database.")
+
+    with game_db_context(database_url):
+        picks: Dict[str, str] = {}
+        translator_name = _pick_best_translator_from_db(mission, state)
+        if translator_name:
+            mission.assigned_translator = translator_name
+            picks["translator"] = translator_name
+
+        load, project_counts = _vo_load_maps()
+        used: set[str] = set()
+        for role in mission.roles:
+            candidates = [
+                row for row in VOTeam.query.filter_by(active=True).order_by(VOTeam.name.asc()).all()
+                if ((row.gender or "").strip().lower().startswith("m") and role.gender == "male")
+                or ((row.gender or "").strip().lower().startswith("f") and role.gender == "female")
+            ]
+            best = pick_vo(candidates, used=used, load=load, project_counts=project_counts)
+            if best is None:
+                continue
+            mission.assigned_roles[role.role] = best.name
+            used.add(best.name)
+            picks[role.role] = best.name
+        state.log.append(f"DB auto-cast siap untuk {mission.code}: {', '.join(f'{k}={v}' for k, v in picks.items())}")
+        return picks
 
 
 def _get_movie_by_mission(mission: Mission) -> Movie:

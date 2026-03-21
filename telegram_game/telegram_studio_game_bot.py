@@ -9,6 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from telegram_game.db_integration import (
+    auto_cast_db_mission,
     list_db_missions,
     load_db_mission_into_state,
     load_specific_db_mission_into_state,
@@ -124,7 +125,7 @@ def _help_text() -> str:
         "/newgame — reset studio\n"
         "/mission — tengok misi\n"
         "/dbmission — paksa load mission dari DB\n"
-        "/missions [status=...] [translator=...] — senarai mission aktif dari DB\n"
+        "/missions [status=...] [translator=...] [priority=...] [lang=...] [page=...] — senarai mission aktif dari DB\n"
         "/pick <code> — pilih mission tertentu dari DB\n"
         "/syncdb — sync translator/VO dari DB\n"
         "/accept — terima misi\n"
@@ -141,9 +142,12 @@ def _help_text() -> str:
     )
 
 
-def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str]]:
+def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
     status: Optional[str] = None
     translator_parts: list[str] = []
+    priority: Optional[str] = None
+    lang: Optional[str] = None
+    page: int = 1
     mode: Optional[str] = None
 
     for raw in args:
@@ -160,6 +164,21 @@ def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str
             translator_parts = [value] if value else []
             mode = "translator"
             continue
+        if lower.startswith("priority="):
+            priority = token.split("=", 1)[1].strip() or None
+            mode = None
+            continue
+        if lower.startswith("lang="):
+            lang = token.split("=", 1)[1].strip() or None
+            mode = None
+            continue
+        if lower.startswith("page="):
+            try:
+                page = max(1, int(token.split("=", 1)[1].strip() or "1"))
+            except ValueError:
+                page = 1
+            mode = None
+            continue
         if lower == "translator":
             translator_parts = []
             mode = "translator"
@@ -167,20 +186,117 @@ def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str
         if lower == "status":
             mode = "status"
             continue
+        if lower == "priority":
+            mode = "priority"
+            continue
+        if lower == "lang":
+            mode = "lang"
+            continue
+        if lower == "page":
+            mode = "page"
+            continue
         if mode == "translator":
             translator_parts.append(token)
         elif mode == "status" and status is None:
             status = token
+        elif mode == "priority" and priority is None:
+            priority = token
+        elif mode == "lang" and lang is None:
+            lang = token
+        elif mode == "page":
+            try:
+                page = max(1, int(token))
+            except ValueError:
+                page = 1
         elif status is None and lower.replace("_", "").replace("-", "") in {"new", "pending", "inprogress", "completed", "ready", "active"}:
             status = token
+        elif priority is None and lower in {"superurgent", "urgent", "nonurgent", "flexible", "su", "normal", "low"}:
+            priority = token
+        elif lang is None and len(lower) <= 5 and lower.replace("-", "").isalpha():
+            lang = token
         else:
             translator_parts.append(token)
 
     translator = " ".join(part for part in translator_parts if part).strip() or None
-    return status, translator
+    return status, translator, priority, lang, page
 
 
-def _mission_pick_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
+def _mission_filter_tokens(
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+    page: int = 1,
+) -> list[str]:
+    tokens: list[str] = []
+    if status:
+        tokens.append(f"status={status}")
+    if translator:
+        tokens.append(f"translator={translator}")
+    if priority:
+        tokens.append(f"priority={priority}")
+    if lang:
+        tokens.append(f"lang={lang}")
+    if page > 1:
+        tokens.append(f"page={page}")
+    return tokens
+
+
+def _missions_callback_payload(
+    page: int,
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> str:
+    parts = [f"p={max(1, page)}"]
+    if status:
+        parts.append(f"s={status}")
+    if translator and len(translator) <= 18:
+        parts.append(f"t={translator}")
+    if priority:
+        parts.append(f"r={priority}")
+    if lang:
+        parts.append(f"l={lang}")
+    return "g|missions|" + ";".join(parts)
+
+
+def _parse_missions_callback(payload: str) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
+    status = None
+    translator = None
+    priority = None
+    lang = None
+    page = 1
+    for part in (payload or "").split(";"):
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        value = value.strip() or None
+        if key == "p":
+            try:
+                page = max(1, int(value or "1"))
+            except ValueError:
+                page = 1
+        elif key == "s":
+            status = value
+        elif key == "t":
+            translator = value
+        elif key == "r":
+            priority = value
+        elif key == "l":
+            lang = value
+    return status, translator, priority, lang, page
+
+
+def _mission_pick_keyboard(
+    items: list[dict],
+    page: int = 1,
+    total_pages: int = 1,
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     rows = []
     for item in items[:8]:
         code = str(item["code"])
@@ -189,25 +305,48 @@ def _mission_pick_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
         if len(title) <= 18:
             label += f" · {title}"
         rows.append([InlineKeyboardButton(label, callback_data=f"g|pick|{code}")])
+
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=_missions_callback_payload(page - 1, status, translator, priority, lang)))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=_missions_callback_payload(page + 1, status, translator, priority, lang)))
+    if nav:
+        rows.append(nav)
     rows.append([InlineKeyboardButton("⬅️ Menu", callback_data="g|mission")])
     return InlineKeyboardMarkup(rows)
 
 
-def _missions_text(items: list[dict], status: Optional[str] = None, translator: Optional[str] = None) -> str:
+def _missions_text(
+    items: list[dict],
+    status: Optional[str] = None,
+    translator: Optional[str] = None,
+    priority: Optional[str] = None,
+    lang: Optional[str] = None,
+    page: int = 1,
+    total_pages: int = 1,
+    total: Optional[int] = None,
+) -> str:
     filters = []
     if status:
         filters.append(f"status={status}")
     if translator:
         filters.append(f"translator={translator}")
+    if priority:
+        filters.append(f"priority={priority}")
+    if lang:
+        filters.append(f"lang={lang}")
     header = "📚 DB mission list"
     if filters:
         header += f" ({', '.join(filters)})"
+    if total is not None:
+        header += f"\nPage {page}/{total_pages} | total {total}"
     if not items:
         return f"{header}\n\n❌ Tiada mission sepadan dijumpai dalam DB."
     lines = [header, "Pilih dengan button di bawah atau guna /pick <code>.", ""]
     for item in items:
         lines.append(
-            f"- {item['code']} | {item['title']} | status {item['status']} | {item['priority']} | "
+            f"- {item['code']} | {item['title']} | {str(item.get('lang', '-')).upper()} | status {item['status']} | {item['priority']} | "
             f"roles {item['role_count']} | lines {item['total_lines']} | translator {item['translator']}"
         )
     return "\n".join(lines)
@@ -267,17 +406,43 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
-    status, translator = _parse_mission_filters(context.args)
+    status, translator, priority, lang, page = _parse_mission_filters(context.args)
     try:
-        items = list_db_missions(state, limit=8, status=status, translator=translator)
-        text = _missions_text(items, status=status, translator=translator)
-        markup = _mission_pick_keyboard(items) if items else _menu()
+        payload = list_db_missions(
+            state,
+            limit=8,
+            status=status,
+            translator=translator,
+            priority=priority,
+            lang=lang,
+            page=page,
+            include_meta=True,
+        )
+        items = payload["items"]
+        text = _missions_text(
+            items,
+            status=status,
+            translator=translator,
+            priority=priority,
+            lang=lang,
+            page=payload["page"],
+            total_pages=payload["total_pages"],
+            total=payload["total"],
+        )
+        markup = _mission_pick_keyboard(
+            items,
+            page=payload["page"],
+            total_pages=payload["total_pages"],
+            status=status,
+            translator=translator,
+            priority=priority,
+            lang=lang,
+        ) if items or payload["has_prev"] or payload["has_next"] else _menu()
     except Exception as exc:
         text = f"❌ Tak dapat ambil list mission DB: {exc}"
         markup = _menu()
     _save(state)
     await update.effective_message.reply_text(text, reply_markup=markup)
-
 
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
@@ -325,15 +490,21 @@ async def cmd_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_autocast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
-    picks = auto_cast(state)
-    db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+    try:
+        if GAME_USE_DB and mission.source == "database":
+            picks = auto_cast_db_mission(state)
+        else:
+            picks = auto_cast(state)
+        db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+        pretty = "\n".join(f"- {k}: {v}" for k, v in picks.items()) if picks else "- Tiada cast tersedia"
+        extra = ""
+        if db_info:
+            extra = f"\n\nDB synced: task #{db_info['translation_task_id']}, assignments +{db_info['assignment_created']} created"
+        text = f"🤖 Auto cast siap untuk {mission.code}:\n{pretty}{extra}"
+    except Exception as exc:
+        text = f"❌ Auto cast gagal: {exc}"
     _save(state)
-    pretty = "\n".join(f"- {k}: {v}" for k, v in picks.items()) if picks else "- Tiada cast tersedia"
-    extra = ""
-    if db_info:
-        extra = f"\n\nDB synced: task #{db_info['translation_task_id']}, assignments +{db_info['assignment_created']} created"
-    await update.effective_message.reply_text(f"🤖 Auto cast siap untuk {mission.code}:\n{pretty}{extra}", reply_markup=_menu())
-
+    await update.effective_message.reply_text(text, reply_markup=_menu())
 
 async def cmd_assigntr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
@@ -471,6 +642,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await cmd_pick(update, context)
         return
 
+    if len(parts) >= 3 and parts[1] == "missions":
+        status, translator, priority, lang, page = _parse_missions_callback("|".join(parts[2:]))
+        context.args = _mission_filter_tokens(status, translator, priority, lang, page)  # type: ignore[attr-defined]
+        await cmd_missions(update, context)
+        return
+
     action = parts[1] if len(parts) > 1 else ""
     mapping = {
         "mission": cmd_mission,
@@ -489,7 +666,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     handler = mapping.get(action)
     if handler:
         await handler(update, context)
-
 
 def build_game_app() -> Application:
     if not BOT_TOKEN:
