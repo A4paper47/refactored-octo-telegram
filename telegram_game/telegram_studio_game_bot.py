@@ -153,7 +153,7 @@ def _help_text() -> str:
     )
 
 
-def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
+def _parse_mission_filters(args: Optional[list[str]]) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
     status: Optional[str] = None
     translator_parts: list[str] = []
     priority: Optional[str] = None
@@ -161,7 +161,7 @@ def _parse_mission_filters(args: list[str]) -> tuple[Optional[str], Optional[str
     page: int = 1
     mode: Optional[str] = None
 
-    for raw in args:
+    for raw in (args or []):
         token = raw.strip()
         if not token:
             continue
@@ -411,7 +411,7 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
-    status, translator, priority, lang, page = _parse_mission_filters(context.args)
+    status, translator, priority, lang, page = _parse_mission_filters(getattr(context, "args", None))
     try:
         payload = list_db_missions(
             state,

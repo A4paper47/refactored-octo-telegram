@@ -39,3 +39,29 @@ def test_callback_does_not_mutate_update_and_dispatches(monkeypatch):
 
     assert update.callback_query.answered is True
     assert called['ok'] is True
+
+
+def test_callback_missions_handles_missing_context_args(monkeypatch):
+    captured = {}
+
+    async def fake_cmd_missions(update, context):
+        captured["args"] = getattr(context, "args", None)
+
+    monkeypatch.setattr(bot, 'cmd_missions', fake_cmd_missions)
+    update = GuardedUpdate('g|missions')
+    context = SimpleNamespace(args=None)
+
+    asyncio.run(bot.on_callback(update, context))
+
+    assert update.callback_query.answered is True
+    assert captured["args"] is None
+
+
+def test_parse_mission_filters_accepts_none():
+    status, translator, priority, lang, page = bot._parse_mission_filters(None)
+
+    assert status is None
+    assert translator is None
+    assert priority is None
+    assert lang is None
+    assert page == 1
