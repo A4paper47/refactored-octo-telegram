@@ -27,6 +27,65 @@ BOT_AUTO_START = os.getenv("BOT_AUTO_START", "1").strip() not in ("0", "false", 
 BOT_ENABLED = bool(BOT_TOKEN)
 GAME_USE_DB = os.getenv("GAME_USE_DB", "1").strip() not in ("0", "false", "False", "")
 
+RUNTIME_FILE_GROUPS = {
+    "core": [
+        "render_game_web.py",
+        "Dockerfile",
+        "render.yaml",
+        "requirements.txt",
+        "db.py",
+        "models.py",
+        "assign_logic.py",
+        "version.py",
+    ],
+    "telegram": [
+        "telegram_game/game_engine.py",
+        "telegram_game/db_integration.py",
+        "telegram_game/telegram_studio_game_bot.py",
+        "telegram_game/__init__.py",
+    ],
+    "ui": [
+        "templates/render_dashboard.html",
+        "static/render_dashboard.css",
+        "static/render_dashboard.js",
+    ],
+    "tests": [
+        "telegram_game/test_game_engine.py",
+        "telegram_game/test_db_integration.py",
+        "telegram_game/test_render_web_service.py",
+        "telegram_game/test_bot_callback.py",
+        "telegram_game/test_v11_ui_cleanup.py",
+        "conftest.py",
+    ],
+}
+
+REMOVED_FILE_GROUPS = {
+    "legacy_flask_tracker": [
+        "app.py",
+        "bot_ptb.py",
+        "export_dynamic.py",
+        "export_excel.py",
+        "restore_dynamic.py",
+        "movie_history.py",
+        "movie_merge.py",
+        "ops_log.py",
+        "sec_logging.py",
+    ],
+    "temporary_or_local": [
+        "_ins_admin.py",
+        "_test_translator_srt.py",
+        "_test_web_smoke.py",
+        "admin_snip.txt",
+        "Web Vo tracker excel.xlsx",
+        "test_screenshot.db",
+        "test_smoke.db",
+    ],
+    "old_ui_assets": [
+        "templates/*.html from old tracker app",
+        "static/style.css",
+    ],
+}
+
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
@@ -222,20 +281,45 @@ def _service_snapshot() -> dict[str, Any]:
     return payload
 
 
+def _safe_page(raw: Optional[str]) -> int:
+    try:
+        return max(1, int((raw or "1").strip() or "1"))
+    except ValueError:
+        return 1
+
+
 def _dashboard_filters() -> dict[str, Any]:
     return {
         "status": (request.args.get("status") or "").strip() or None,
         "translator": (request.args.get("translator") or "").strip() or None,
         "priority": (request.args.get("priority") or "").strip() or None,
         "lang": (request.args.get("lang") or "").strip() or None,
-        "page": max(1, int((request.args.get("page") or "1").strip() or "1")),
+        "page": _safe_page(request.args.get("page")),
+    }
+
+
+def _manifest_payload() -> dict[str, Any]:
+    total_kept = sum(len(items) for items in RUNTIME_FILE_GROUPS.values())
+    total_removed = sum(len(items) for items in REMOVED_FILE_GROUPS.values())
+    return {
+        "kept": RUNTIME_FILE_GROUPS,
+        "removed": REMOVED_FILE_GROUPS,
+        "kept_total": total_kept,
+        "removed_total": total_removed,
     }
 
 
 def _dashboard_board() -> dict[str, Any]:
     filters = _dashboard_filters()
     if not GAME_USE_DB:
-        return {"items": [], "page": 1, "total_pages": 1, "total": 0, "counts": {}, "error": "GAME_USE_DB=0, mission board DB dimatikan."}
+        return {
+            "items": [],
+            "page": 1,
+            "total_pages": 1,
+            "total": 0,
+            "counts": {},
+            "error": "GAME_USE_DB=0, mission board DB dimatikan.",
+        }
     try:
         state = new_game(user_id=0, studio_name="Render Dashboard")
         payload = list_db_missions(
@@ -257,7 +341,14 @@ def _dashboard_board() -> dict[str, Any]:
         payload["error"] = None
         return payload
     except Exception as exc:
-        return {"items": [], "page": filters["page"], "total_pages": 1, "total": 0, "counts": {}, "error": str(exc)}
+        return {
+            "items": [],
+            "page": filters["page"],
+            "total_pages": 1,
+            "total": 0,
+            "counts": {},
+            "error": str(exc),
+        }
 
 
 @app.route("/")
@@ -273,11 +364,13 @@ def dashboard():
         service=_service_snapshot(),
         board=_dashboard_board(),
         filters=_dashboard_filters(),
+        manifest=_manifest_payload(),
         setup_path=url_for("setup_webhook_route"),
         webhook_info_path=url_for("webhook_info_route"),
         delete_webhook_path=url_for("delete_webhook_route"),
         api_status_path=url_for("api_status"),
         api_missions_path=url_for("api_missions"),
+        api_manifest_path=url_for("api_manifest"),
         health_path=url_for("health"),
     )
 
@@ -293,19 +386,10 @@ def api_missions():
     payload["filters"] = _dashboard_filters()
     return jsonify(payload)
 
-    return jsonify(
-        {
-            "service": "studio-dub-tycoon-webhook",
-            "status": "ok" if _bot_started else "starting" if BOT_ENABLED else "disabled",
-            "bot_enabled": BOT_ENABLED,
-            "bot_started": _bot_started,
-            "mode": "webhook",
-            "webhook_path": webhook_path(),
-            "render_external_url": RENDER_EXTERNAL_URL or None,
-            "webhook_url": webhook_url() or None,
-            "start_error": _bot_start_error,
-        }
-    )
+
+@app.route("/api/manifest")
+def api_manifest():
+    return jsonify(_manifest_payload())
 
 
 @app.route("/health")

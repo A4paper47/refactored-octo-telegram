@@ -822,31 +822,39 @@ def _staff_line(member: Staff, compact: bool = False) -> str:
 
 def roster_summary(state: GameState) -> str:
     lines = [
-        f"🏢 {state.studio_name} — Day {state.day} — Coins {state.coins} — XP {state.xp} — Level {state.level()}",
-        f"Studio tier {state.studio_tier} | Payroll {total_salary(state)} | Reputation {state.reputation} | Upgrades T{state.upgrades.get('translator_lab', 0)} / V{state.upgrades.get('vo_booth', 0)} / L{state.upgrades.get('lounge', 0)}",
+        f"👥 Roster — {state.studio_name}",
+        f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()} | Rep {state.reputation}",
+        f"Studio tier {state.studio_tier} | Payroll {total_salary(state)} | Upgrades T{state.upgrades.get('translator_lab', 0)} / V{state.upgrades.get('vo_booth', 0)} / L{state.upgrades.get('lounge', 0)}",
     ]
     for kind, label in [("translator", "Translator"), ("male", "VO Male"), ("female", "VO Female")]:
-        lines.append(f"\n{label}:")
-        for member in [s for s in state.roster if s.role_type == kind]:
+        members = [s for s in state.roster if s.role_type == kind]
+        lines.append(f"\n{label} ({len(members)}):")
+        if not members:
+            lines.append("- kosong")
+            continue
+        for member in members:
             lines.append(_staff_line(member))
     return "\n".join(lines)
 
 
 def current_team_summary(state: GameState) -> str:
     mission = ensure_mission(state)
-    lines = [f"🎯 Team untuk mission {mission.code} — {mission.title}"]
-    lines.append(f"Client: {mission.client_name} [{mission.client_tier}] | Rep reward {mission.reputation_reward}")
-    lines.append(f"Translator: {mission.assigned_translator or '-'}")
+    lines = [
+        f"🎯 Team untuk mission {mission.code}",
+        f"{mission.title}",
+        f"Client: {mission.client_name} [{mission.client_tier}] | Rep +{mission.reputation_reward}",
+        "",
+        f"Translator: {mission.assigned_translator or '-'}",
+    ]
     for role in mission.roles:
-        lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')}")
+        lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.lines} lines)")
     assigned_names = _assigned_staff_names(mission)
+    lines.append("")
     if assigned_names:
-        lines.append("")
         lines.append("Staff on mission:")
         for member in sorted((s for s in state.roster if s.name in assigned_names), key=lambda s: (s.role_type, s.name.lower())):
             lines.append(f"- {_staff_line(member, compact=True)}")
     else:
-        lines.append("")
         lines.append("Belum ada staff assign lagi.")
     return "\n".join(lines)
 
@@ -854,7 +862,7 @@ def current_team_summary(state: GameState) -> str:
 def bench_summary(state: GameState) -> str:
     mission = ensure_mission(state)
     assigned_names = _assigned_staff_names(mission)
-    lines = [f"🪑 Bench untuk mission {mission.code}"]
+    lines = [f"🪑 Bench untuk mission {mission.code}", "Staff yang belum digunakan untuk mission semasa:"]
     for kind, label in [("translator", "Translator bench"), ("male", "VO Male bench"), ("female", "VO Female bench")]:
         lines.append(f"\n{label}:")
         bench = [s for s in state.roster if s.role_type == kind and s.name not in assigned_names]
@@ -870,7 +878,10 @@ def bench_summary(state: GameState) -> str:
 def market_summary(state: GameState) -> str:
     if not state.market:
         return "🛒 Market kosong. Guna /nextday untuk refresh."
-    lines = [f"🛒 Recruitment market — Day {state.day} — Studio tier {state.studio_tier} — Reputation {state.reputation}"]
+    lines = [
+        f"🛒 Recruitment market — Day {state.day}",
+        f"Studio tier {state.studio_tier} | Reputation {state.reputation} | Coins {state.coins}",
+    ]
     for kind, label in [("translator", "Translator recruits"), ("male", "VO Male recruits"), ("female", "VO Female recruits")]:
         lines.append(f"\n{label}:")
         items = [s for s in state.market if s.role_type == kind]
@@ -881,7 +892,7 @@ def market_summary(state: GameState) -> str:
         for member in items:
             rarity_icon = RARITY_ICON.get(member.rarity, "⚪")
             lines.append(
-                f"- {rarity_icon} {member.name}: rarity {member.rarity}, power {round(member.power(), 1)}, skill {member.skill}, speed {member.speed}, lvl {member.level}, hire {member.hire_cost}, salary {member.salary}, traits {_format_traits(member)}"
+                f"- {rarity_icon} {member.name} | rarity {member.rarity} | power {round(member.power(), 1)} | hire {member.hire_cost} | salary {member.salary} | traits {_format_traits(member)}"
             )
     return "\n".join(lines)
 
@@ -893,13 +904,11 @@ def studio_summary(state: GameState) -> str:
     studio_cost = _upgrade_cost(state, "studio")
     unlocked_tiers = ", ".join(sorted({c["tier"] for c in CLIENT_POOL if state.reputation >= CLIENT_UNLOCK_REP[c["tier"]]}))
     return (
-        f"🏢 {state.studio_name}\n"
+        f"🏢 Studio panel — {state.studio_name}\n"
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()}\n"
-        f"Wins {state.wins} | Losses {state.losses}\n"
-        f"Studio tier: {state.studio_tier}\n"
-        f"Reputation: {state.reputation}\n"
-        f"Payroll per day: {total_salary(state)}\n"
-        f"Roster size: {len(state.roster)} | Market size: {len(state.market)}\n"
+        f"Wins {state.wins} | Losses {state.losses} | Reputation {state.reputation}\n"
+        f"Studio tier {state.studio_tier} | Payroll per day {total_salary(state)}\n"
+        f"Roster {len(state.roster)} | Market {len(state.market)}\n"
         f"Unlocked client tiers: {unlocked_tiers or 'indie'}\n\n"
         f"Upgrades:\n"
         f"- translator_lab lvl {state.upgrades.get('translator_lab', 0)} (next {translator_cost})\n"
@@ -911,23 +920,20 @@ def studio_summary(state: GameState) -> str:
 
 def mission_summary(mission: Mission) -> str:
     roles = "\n".join(f"- {r.role} ({r.gender}) — {r.lines} lines" for r in mission.roles)
-    assigned = []
-    assigned.append(f"Translator: {mission.assigned_translator or '-'}")
+    assigned = [f"Translator: {mission.assigned_translator or '-'}"]
     for r in mission.roles:
         assigned.append(f"{r.role}: {mission.assigned_roles.get(r.role, '-')}")
     return (
-        f"🎬 {mission.title} ({mission.year})\n"
+        f"🎬 Mission card\n"
+        f"{mission.title} ({mission.year})\n"
         f"Code: {mission.code}\n"
         f"Client: {mission.client_name} [{mission.client_tier}]\n"
-        f"Lang: {mission.lang.upper()}\n"
-        f"Priority: {mission.priority}\n"
-        f"Deadline day: {mission.deadline_day}\n"
+        f"Lang: {mission.lang.upper()} | Priority: {mission.priority} | Deadline day: {mission.deadline_day}\n"
         f"Reward: {mission.reward} coins | XP: {mission.xp} | Rep: {mission.reputation_reward}\n"
         f"Source: {mission.source}\n\n"
         f"Roles:\n{roles}\n\n"
-        f"Assignment:\n" + "\n".join(assigned)
+        f"Assignments:\n" + "\n".join(assigned)
     )
-
 
 def submission_risk_text(state: GameState) -> str:
     report = submission_risk_report(state)
@@ -965,31 +971,33 @@ def client_summary(state: GameState) -> str:
     current = ensure_mission(state)
     lines = [
         f"🤝 Client desk — Reputation {state.reputation}",
-        f"Current mission client: {current.client_name} [{current.client_tier}]",
+        f"Current mission: {current.client_name} [{current.client_tier}] | reward {current.reward} coins | rep +{current.reputation_reward}",
         "",
-        "Known clients:",
+        "Unlocked / known clients:",
     ]
-    if not state.clients_seen:
+    visible = 0
+    for client in CLIENT_POOL:
+        if client["name"] in state.clients_seen or state.reputation >= CLIENT_UNLOCK_REP[client["tier"]]:
+            visible += 1
+            lines.append(
+                f"- {client['name']} [{client['tier']}] — reward x{client['reward_mult']} | rep +{client['rep']}"
+            )
+    if visible == 0:
         lines.append("- Belum ada client direkod.")
-    else:
-        for client in CLIENT_POOL:
-            if client["name"] in state.clients_seen or state.reputation >= CLIENT_UNLOCK_REP[client["tier"]]:
-                lines.append(
-                    f"- {client['name']} [{client['tier']}] — reward x{client['reward_mult']} | rep +{client['rep']}"
-                )
     return "\n".join(lines)
 
 
 def reputation_summary(state: GameState) -> str:
     unlocked = [client["name"] for client in CLIENT_POOL if state.reputation >= CLIENT_UNLOCK_REP[client["tier"]]]
+    next_tier = next((tier for tier, need in sorted(CLIENT_UNLOCK_REP.items(), key=lambda item: item[1]) if state.reputation < need), None)
     return (
         f"⭐ Reputation board\n"
         f"Studio: {state.studio_name}\n"
         f"Reputation: {state.reputation}\n"
         f"Wins/Losses: {state.wins}/{state.losses}\n"
-        f"Unlocked clients: {', '.join(unlocked) if unlocked else 'Indie Spark'}"
+        f"Unlocked clients: {', '.join(unlocked) if unlocked else 'Indie Spark'}\n"
+        f"Next tier target: {next_tier or 'max tier unlocked'}"
     )
-
 
 def save_state(state: GameState, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

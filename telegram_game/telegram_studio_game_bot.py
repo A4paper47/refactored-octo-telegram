@@ -120,48 +120,61 @@ def _mode_label() -> str:
 
 def _menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
-        [InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui")],
-        [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast")],
-        [InlineKeyboardButton("📤 Submit", callback_data="g|submit"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission")],
-        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench")],
-        [InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🏢 Studio", callback_data="g|studio")],
-        [InlineKeyboardButton("🤝 Clients", callback_data="g|clients"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
-        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("👤 Roster", callback_data="g|roster")],
+        [InlineKeyboardButton("🏠 Home", callback_data="g|menu"), InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
+        [InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui"), InlineKeyboardButton("👥 Team", callback_data="g|team")],
+        [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
+        [InlineKeyboardButton("🏢 Studio", callback_data="g|studio"), InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🤝 Clients", callback_data="g|clients")],
+        [InlineKeyboardButton("👤 Roster", callback_data="g|roster"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
+        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
         [InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
 
 
 def _help_text() -> str:
-    return (
-        "Game ni tukar workflow asal Web VO Tracker jadi management sim dalam Telegram:\n"
-        "project → translator → VO cast → QA → reward → growth studio.\n\n"
-        "Command utama:\n"
-        "/newgame — reset studio\n"
-        "/mission — tengok misi\n"
-        "/dbmission — paksa load mission dari DB\n"
-        "/missions [status=...] [translator=...] [priority=...] [lang=...] [page=...] — senarai mission aktif dari DB\n"
-        "/pick <code> — pilih mission tertentu dari DB\n"
-        "/syncdb — sync translator/VO dari DB\n"
-        "/accept — terima misi\n"
-        "/autocast — auto assign team\n"
-        "/assigntr <nama> — assign translator manual\n"
-        "/assign <role> <nama> — assign VO manual\n"
-        "/clearcast — clear semua assignment semasa\n"
-        "/team — tengok team mission semasa\n"
-        "/bench — tengok staff available\n"
-        "/market — recruitment market\n"
-        "/hire <nama> — ambil staff baru dari market\n"
-        "/fire <nama> — buang staff\n"
-        "/studio — status studio + kos upgrade\n"
-        "/clients — tengok client desk dan client unlock\n"
-        "/reputation — tengok reputasi studio\n"
-        "/upgrade <studio|translator|vo|lounge> — beli upgrade\n"
-        "/submit — hantar ke QA\n"
-        "/roster — tengok semua staff\n"
-        "/nextday — maju hari\n"
-        "/status — ringkasan studio"
-    )
+    return """❓ Studio Dub Tycoon — command guide
+
+Core flow:
+1. /mission atau /missions
+2. /accept
+3. /assignui atau /autocast
+4. /team
+5. /submit
+
+Main commands:
+/menu — panel utama
+/mission — mission semasa
+/missions [status=...] [translator=...] [priority=...] [lang=...] [page=...]
+/pick <code> — pilih mission DB
+/board — ringkasan board
+/assignui — assign dengan button
+/team /bench /roster — lihat staff
+/market /hire /fire — recruitment
+/studio /clients /reputation — studio panel
+/syncdb /dbmission — DB sync tools
+/log /nextday — progression"""
+
+
+def _home_text(state) -> str:
+    mission = _ensure_bot_mission(state)
+    translator_count = len([member for member in state.roster if member.role_type == "translator"])
+    vo_count = len([member for member in state.roster if member.role_type in {"male", "female"}])
+    assigned_roles = sum(1 for role in mission.roles if mission.assigned_roles.get(role.role))
+    lines = [
+        "🎮 Studio Dub Tycoon",
+        f"Studio: {state.studio_name}",
+        f"Mode: {_mode_label()}",
+        f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()} | Rep {state.reputation}",
+        f"Roster: {translator_count} translator · {vo_count} VO | Market {len(state.market)}",
+        "",
+        "Current mission",
+        f"- {mission.code} | {mission.title}",
+        f"- Client {mission.client_name} [{mission.client_tier}] | {mission.lang.upper()} | {mission.priority}",
+        f"- Translator: {mission.assigned_translator or '-'}",
+        f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
+        "",
+        "Tap button bawah untuk cepat gerak. Guna /help kalau nak full guide.",
+    ]
+    return chr(10).join(lines)
 
 
 def _parse_mission_filters(args: Optional[list[str]]) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
@@ -367,15 +380,16 @@ def _board_keyboard() -> InlineKeyboardMarkup:
 def _board_text(state) -> str:
     if not GAME_USE_DB:
         mission = _ensure_bot_mission(state)
-        return "🗂️ Mission board (demo mode)\n\n" + mission_summary(mission)
-    chunks = ["🗂️ Mission board"]
+        return "🗂️ Mission board (demo mode)" + chr(10) + chr(10) + mission_summary(mission)
+    chunks = ["🗂️ Mission board snapshot", "Guna /missions untuk list penuh atau tap filter button bawah."]
     for status in ["NEW", "IN_PROGRESS", "READY", "COMPLETED"]:
         try:
             total = count_db_movie_candidates(status=status)
             items = list_db_missions(state, limit=3, status=status)
         except Exception as exc:
             return f"❌ Tak dapat load board DB: {exc}"
-        chunks.append(f"\n{status} ({total})")
+        chunks.append("")
+        chunks.append(f"{status} ({total})")
         if not items:
             chunks.append("- kosong")
             continue
@@ -383,22 +397,23 @@ def _board_text(state) -> str:
             chunks.append(
                 f"- {item['code']} | {item['title']} | {item.get('lang', '-')} | {item.get('priority', '-')} | TR: {item.get('translator') or '-'}"
             )
-    return "\n".join(chunks)
+    return chr(10).join(chunks)
 
 
 def _assign_ui_text(state) -> str:
     mission = _ensure_bot_mission(state)
     tr = mission.assigned_translator or "-"
     lines = [
-        f"🧠 Inline assign UI — {mission.code}",
+        f"🧠 Assign panel — {mission.code}",
+        mission.title,
         f"Translator: {tr}",
         "Roles:",
     ]
     for role in mission.roles:
         lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.lines} lines)")
     lines.append("")
-    lines.append("Tap translator shortcut atau pilih role untuk tengok calon terbaik.")
-    return "\n".join(lines)
+    lines.append("Tap translator shortcut atau pilih role untuk calon terbaik.")
+    return chr(10).join(lines)
 
 
 def _role_picker_text(state, role_name: str) -> str:
@@ -555,30 +570,37 @@ def _missions_text(
         filters.append(f"priority={priority}")
     if lang:
         filters.append(f"lang={lang}")
-    header = "📚 DB mission list"
+    header = ["📚 DB mission list"]
     if filters:
-        header += f" ({', '.join(filters)})"
-    header += f"\nPage {page}/{max(1, total_pages)}"
-    if total is not None:
-        header += f" — total {total}"
+        header.append(f"Filter: {', '.join(filters)}")
+    suffix = f" — total {total}" if total is not None else ""
+    header.append(f"Page {page}/{max(1, total_pages)}{suffix}")
     if not items:
-        return header + "\n\n- Tiada mission jumpa."
-    lines = [header, ""]
+        return chr(10).join(header + ["", "- Tiada mission jumpa."])
+    lines = header + [""]
     for item in items:
         lines.append(
-            f"- {item['code']} | {item['title']} | {item.get('lang', '-')} | {item.get('priority', '-')} | {item.get('status', '-')} | TR: {item.get('translator') or '-'}"
+            f"- {item['code']} | {item['title']}" + chr(10) + f"  {item.get('lang', '-')} | {item.get('priority', '-')} | {item.get('status', '-')} | TR: {item.get('translator') or '-'}"
         )
-    return "\n".join(lines)
+    return chr(10).join(lines)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _save(state)
-    await update.effective_message.reply_text(
-        f"🎮 *Studio Dub Tycoon*\nMode: *{_mode_label()}*\n\n{_help_text()}",
-        parse_mode="Markdown",
-        reply_markup=_menu(),
-    )
+    await update.effective_message.reply_text(_home_text(state), reply_markup=_menu())
+
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(_home_text(state), reply_markup=_menu())
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(_help_text(), reply_markup=_menu())
 
 
 async def cmd_newgame(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -912,19 +934,9 @@ async def cmd_reputation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
-    mission = _ensure_bot_mission(state)
-    text = (
-        f"🏢 {state.studio_name}\n"
-        f"Mode: {_mode_label()}\n"
-        f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()}\n"
-        f"Studio tier {state.studio_tier} | Reputation {state.reputation}\n"
-        f"Wins {state.wins} | Losses {state.losses}\n\n"
-        f"Current mission:\n{mission.title} ({mission.code})\n"
-        f"Client: {mission.client_name} [{mission.client_tier}]\n"
-        f"Mission source: {mission.source}"
-    )
+    _ensure_bot_mission(state)
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    await update.effective_message.reply_text(_home_text(state), reply_markup=_menu())
 
 
 async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1005,6 +1017,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     action = parts[1] if len(parts) > 1 else ""
     mapping = {
+        "menu": cmd_menu,
+        "help": cmd_help,
         "mission": cmd_mission,
         "dbmission": cmd_dbmission,
         "missions": cmd_missions,
@@ -1038,6 +1052,8 @@ def build_game_app(token: Optional[str] = None) -> Application:
         raise RuntimeError("Missing BOT_TOKEN")
     app = Application.builder().token(bot_token).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("newgame", cmd_newgame))
     app.add_handler(CommandHandler("mission", cmd_mission))
     app.add_handler(CommandHandler("dbmission", cmd_dbmission))
