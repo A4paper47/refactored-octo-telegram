@@ -429,3 +429,21 @@ Sekarang loop dah ada strategi jangka sederhana:
 - `telegram_game/test_bot_callback.py` ✅
 - `python -m py_compile telegram_game/*.py render_game_web.py` ✅
 - total: **31 passed**
+
+## V10 Update
+
+### Web Service UI fix
+- Added `/dashboard` and `/dashboard/` HTML control center for Render Web Service.
+- Root `/` now redirects to `/dashboard` instead of returning a bare JSON blob.
+- Added `/api/status` and `/api/missions` for JSON-friendly monitoring.
+- Dashboard now shows bot/webhook status, Render URL state, quick actions, and DB mission board filters.
+
+### Telegram game improvements
+- Added `/board` for grouped DB mission board.
+- Added `/assignui` inline picker for translator and role assignment.
+- `/submit` now warns first when assigned staff are too tired / burned out and requires confirmation.
+- Added callback flows for quick translator pick, role pick, and confirmed submit.
+
+### Test status
+- Full test suite passing: 35 passed.
+

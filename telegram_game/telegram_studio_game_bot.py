@@ -4,12 +4,14 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote, unquote
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from telegram_game.db_integration import (
     auto_cast_db_mission,
+    count_db_movie_candidates,
     list_db_missions,
     load_db_mission_into_state,
     load_specific_db_mission_into_state,
@@ -21,6 +23,7 @@ from telegram_game.game_engine import (
     accept_mission,
     assign_role,
     assign_translator,
+    assigned_staff_members,
     auto_cast,
     bench_summary,
     client_summary,
@@ -32,14 +35,16 @@ from telegram_game.game_engine import (
     latest_log,
     load_state,
     market_summary,
-    reputation_summary,
     mission_summary,
     new_game,
     next_day,
+    reputation_summary,
     resolve_submission,
     roster_summary,
     save_state,
     studio_summary,
+    submission_risk_report,
+    submission_risk_text,
     upgrade_studio,
 )
 
@@ -115,9 +120,10 @@ def _mode_label() -> str:
 
 def _menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("✅ Accept", callback_data="g|accept")],
-        [InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
-        [InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
+        [InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
+        [InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui")],
+        [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast")],
+        [InlineKeyboardButton("📤 Submit", callback_data="g|submit"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission")],
         [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench")],
         [InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🏢 Studio", callback_data="g|studio")],
         [InlineKeyboardButton("🤝 Clients", callback_data="g|clients"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
@@ -236,6 +242,203 @@ def _parse_mission_filters(args: Optional[list[str]]) -> tuple[Optional[str], Op
     translator = " ".join(part for part in translator_parts if part).strip() or None
     return status, translator, priority, lang, page
 
+
+def _name_token(value: str) -> str:
+    return quote((value or "").strip(), safe="")
+
+
+def _name_from_token(value: str) -> str:
+    return unquote(value or "").strip()
+
+
+def _staff_rank_for_translator(member, mission) -> float:
+    score = member.power() + member.energy * 0.22 - member.burnout * 0.95
+    traits = set(member.traits or [])
+    if mission.lang.lower() in {"bn", "ms", "en"} and "polyglot" in traits:
+        score += 14
+    if mission.priority in {"urgent", "superurgent"} and "sprinter" in traits:
+        score += 10
+    if "perfectionist" in traits:
+        score += 8
+    if "veteran" in traits:
+        score += 6
+    return round(score, 2)
+
+
+def _staff_rank_for_role(member, mission, role) -> float:
+    score = member.power() + member.energy * 0.18 - member.burnout * 0.9
+    traits = set(member.traits or [])
+    if mission.priority in {"urgent", "superurgent"} and "sprinter" in traits:
+        score += 9
+    if role.lines >= 90 and "workhorse" in traits:
+        score += 10
+    if "natural" in traits:
+        score += 6
+    if "charmer" in traits and role.gender == member.role_type:
+        score += 4
+    if "veteran" in traits:
+        score += 5
+    return round(score, 2)
+
+
+def _top_translator_candidates(state, limit: int = 5):
+    mission = _ensure_bot_mission(state)
+    pool = [member for member in state.roster if member.role_type == "translator"]
+    return sorted(pool, key=lambda member: (_staff_rank_for_translator(member, mission), member.level, member.name.lower()), reverse=True)[:limit]
+
+
+def _top_role_candidates(state, role_name: str, limit: int = 5):
+    mission = _ensure_bot_mission(state)
+    role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
+    if role is None:
+        return []
+    pool = [member for member in state.roster if member.role_type == role.gender]
+    assigned = {member.name for member in assigned_staff_members(state, mission) if member.name != mission.assigned_roles.get(role.role)}
+    ranked = sorted(
+        pool,
+        key=lambda member: (
+            member.name not in assigned,
+            _staff_rank_for_role(member, mission, role),
+            member.level,
+            member.name.lower(),
+        ),
+        reverse=True,
+    )
+    return ranked[:limit]
+
+
+def _assign_ui_keyboard(state) -> InlineKeyboardMarkup:
+    mission = _ensure_bot_mission(state)
+    rows: list[list[InlineKeyboardButton]] = []
+    tr_candidates = _top_translator_candidates(state, limit=3)
+    if tr_candidates:
+        rows.append([
+            InlineKeyboardButton(f"TR {member.name}", callback_data=f"g|settr|{_name_token(member.name)}")
+            for member in tr_candidates[:2]
+        ])
+        if len(tr_candidates) > 2:
+            rows.append([
+                InlineKeyboardButton(f"TR {tr_candidates[2].name}", callback_data=f"g|settr|{_name_token(tr_candidates[2].name)}")
+            ])
+    role_buttons = [
+        InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}")
+        for role in mission.roles
+    ]
+    for idx in range(0, len(role_buttons), 2):
+        rows.append(role_buttons[idx:idx+2])
+    rows.append([
+        InlineKeyboardButton("👥 Team", callback_data="g|team"),
+        InlineKeyboardButton("📤 Submit", callback_data="g|submit"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _role_picker_keyboard(state, role_name: str) -> InlineKeyboardMarkup:
+    candidates = _top_role_candidates(state, role_name, limit=6)
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx in range(0, len(candidates), 2):
+        chunk = candidates[idx:idx+2]
+        rows.append([
+            InlineKeyboardButton(member.name, callback_data=f"g|setrole|{_name_token(role_name)}|{_name_token(member.name)}")
+            for member in chunk
+        ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Assign UI", callback_data="g|assignui"),
+        InlineKeyboardButton("👥 Team", callback_data="g|team"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _submit_warning_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚠️ Proceed QA", callback_data="g|submitconfirm")],
+        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
+    ])
+
+
+def _board_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("NEW", callback_data="g|missions|s=NEW|p=1"), InlineKeyboardButton("IN_PROGRESS", callback_data="g|missions|s=IN_PROGRESS|p=1")],
+        [InlineKeyboardButton("READY", callback_data="g|missions|s=READY|p=1"), InlineKeyboardButton("COMPLETED", callback_data="g|missions|s=COMPLETED|p=1")],
+        [InlineKeyboardButton("📚 All Missions", callback_data="g|missions")],
+    ])
+
+
+def _board_text(state) -> str:
+    if not GAME_USE_DB:
+        mission = _ensure_bot_mission(state)
+        return "🗂️ Mission board (demo mode)\n\n" + mission_summary(mission)
+    chunks = ["🗂️ Mission board"]
+    for status in ["NEW", "IN_PROGRESS", "READY", "COMPLETED"]:
+        try:
+            total = count_db_movie_candidates(status=status)
+            items = list_db_missions(state, limit=3, status=status)
+        except Exception as exc:
+            return f"❌ Tak dapat load board DB: {exc}"
+        chunks.append(f"\n{status} ({total})")
+        if not items:
+            chunks.append("- kosong")
+            continue
+        for item in items:
+            chunks.append(
+                f"- {item['code']} | {item['title']} | {item.get('lang', '-')} | {item.get('priority', '-')} | TR: {item.get('translator') or '-'}"
+            )
+    return "\n".join(chunks)
+
+
+def _assign_ui_text(state) -> str:
+    mission = _ensure_bot_mission(state)
+    tr = mission.assigned_translator or "-"
+    lines = [
+        f"🧠 Inline assign UI — {mission.code}",
+        f"Translator: {tr}",
+        "Roles:",
+    ]
+    for role in mission.roles:
+        lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.lines} lines)")
+    lines.append("")
+    lines.append("Tap translator shortcut atau pilih role untuk tengok calon terbaik.")
+    return "\n".join(lines)
+
+
+def _role_picker_text(state, role_name: str) -> str:
+    mission = _ensure_bot_mission(state)
+    role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
+    if role is None:
+        return f"❌ Role {role_name} tak jumpa."
+    lines = [
+        f"🎯 Pilih VO untuk {role.role}",
+        f"Gender: {role.gender}",
+        f"Lines: {role.lines}",
+        f"Current: {mission.assigned_roles.get(role.role, '-')}",
+        "",
+        "Calon teratas:",
+    ]
+    for member in _top_role_candidates(state, role.role, limit=6):
+        lines.append(f"- {member.name} | power {round(member.power(),1)} | energy {member.energy} | burnout {member.burnout}")
+    return "\n".join(lines)
+
+
+def _submit_result_text(state, result: dict, db_info: Optional[dict] = None) -> str:
+    verdict = "🏆 QA LULUS" if result["passed"] else "💥 QA GAGAL"
+    text = (
+        f"{verdict}\n"
+        f"Mission: {result['code']} — {result['title']}\n"
+        f"Client: {result['client_name']} [{result['client_tier']}]\n"
+        f"Score: {result['qa_score']} / {result['threshold']}\n"
+        f"Reward: +{result['reward']} coins\n"
+        f"XP: +{result['xp']}\n"
+        f"Reputation: {result['rep_change']:+d} → {result['reputation']}\n"
+        f"Studio coins sekarang: {state.coins}"
+    )
+    if db_info:
+        text += f"\nDB write-back: {'COMPLETED' if db_info['passed'] else 'updated only'}, VO submissions +{db_info['vo_submissions_created']}"
+    return text
+
+
+def _pending_submit_warning_text(state) -> str:
+    mission = _ensure_bot_mission(state)
+    return submission_risk_text(state) + f"\n\nMission {mission.code} ada risiko. Proceed kalau kau memang nak terus QA sekarang."
 
 def _mission_filter_tokens(
     status: Optional[str] = None,
@@ -455,6 +658,20 @@ async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(text, reply_markup=markup)
 
 
+async def cmd_board(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    _save(state)
+    await update.effective_message.reply_text(_board_text(state), reply_markup=_board_keyboard())
+
+
+async def cmd_assignui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    _save(state)
+    await update.effective_message.reply_text(_assign_ui_text(state), reply_markup=_assign_ui_keyboard(state))
+
+
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     code = " ".join(context.args).strip()
@@ -568,29 +785,32 @@ async def cmd_clearcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.effective_message.reply_text(text, reply_markup=_menu())
 
 
-async def cmd_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _finalize_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     mission_before = state.current_mission
     try:
         result = resolve_submission(state)
         db_info = _persist_submission_if_db(mission_before, result, actor_name=update.effective_user.first_name or "player")
-        verdict = "🏆 QA LULUS" if result["passed"] else "💥 QA GAGAL"
-        text = (
-            f"{verdict}\n"
-            f"Mission: {result['code']} — {result['title']}\n"
-            f"Client: {result['client_name']} [{result['client_tier']}]\n"
-            f"Score: {result['qa_score']} / {result['threshold']}\n"
-            f"Reward: +{result['reward']} coins\n"
-            f"XP: +{result['xp']}\n"
-            f"Reputation: {result['rep_change']:+d} → {result['reputation']}\n"
-            f"Studio coins sekarang: {state.coins}"
-        )
-        if db_info:
-            text += f"\nDB write-back: {'COMPLETED' if db_info['passed'] else 'updated only'}, VO submissions +{db_info['vo_submissions_created']}"
+        text = _submit_result_text(state, result, db_info=db_info)
     except Exception as exc:
         text = f"❌ {exc}"
     _save(state)
     await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    report = submission_risk_report(state)
+    if report["blockers"]:
+        _save(state)
+        await update.effective_message.reply_text("❌ " + submission_risk_text(state), reply_markup=_menu())
+        return
+    if report["has_warning"]:
+        _save(state)
+        await update.effective_message.reply_text(_pending_submit_warning_text(state), reply_markup=_submit_warning_keyboard())
+        return
+    await _finalize_submit(update, context)
 
 
 async def cmd_roster(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -738,11 +958,58 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await cmd_missions(update, context)
         return
 
+    if len(parts) >= 3 and parts[1] == "settr":
+        state = _load_or_create(update.effective_user.id)
+        _ensure_bot_mission(state)
+        name = _name_from_token(parts[2])
+        try:
+            assigned = assign_translator(state, name)
+            db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+            text = f"📝 Translator assigned: {assigned}"
+            if db_info:
+                text += f"\nDB task synced: #{db_info['translation_task_id']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state))
+        return
+
+    if len(parts) >= 3 and parts[1] == "pickrole":
+        state = _load_or_create(update.effective_user.id)
+        _ensure_bot_mission(state)
+        role_name = _name_from_token(parts[2])
+        _save(state)
+        await update.effective_message.reply_text(_role_picker_text(state, role_name), reply_markup=_role_picker_keyboard(state, role_name))
+        return
+
+    if len(parts) >= 4 and parts[1] == "setrole":
+        state = _load_or_create(update.effective_user.id)
+        _ensure_bot_mission(state)
+        role_name = _name_from_token(parts[2])
+        staff_name = _name_from_token(parts[3])
+        try:
+            assigned = assign_role(state, role_name, staff_name)
+            db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+            text = f"🎙️ Role {role_name} → {assigned}"
+            if db_info:
+                text += "\nDB assignments synced."
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state))
+        return
+
+    if len(parts) >= 2 and parts[1] == "submitconfirm":
+        await _finalize_submit(update, context)
+        return
+
     action = parts[1] if len(parts) > 1 else ""
     mapping = {
         "mission": cmd_mission,
         "dbmission": cmd_dbmission,
         "missions": cmd_missions,
+        "board": cmd_board,
+        "assignui": cmd_assignui,
         "syncdb": cmd_syncdb,
         "accept": cmd_accept,
         "autocast": cmd_autocast,
@@ -761,7 +1028,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if handler:
         await handler(update, context)
 
-
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Telegram handler error", exc_info=context.error)
 
@@ -776,6 +1042,8 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("mission", cmd_mission))
     app.add_handler(CommandHandler("dbmission", cmd_dbmission))
     app.add_handler(CommandHandler("missions", cmd_missions))
+    app.add_handler(CommandHandler("board", cmd_board))
+    app.add_handler(CommandHandler("assignui", cmd_assignui))
     app.add_handler(CommandHandler("pick", cmd_pick))
     app.add_handler(CommandHandler("syncdb", cmd_syncdb))
     app.add_handler(CommandHandler("accept", cmd_accept))

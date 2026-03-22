@@ -755,6 +755,57 @@ def _assigned_staff_names(mission: Mission) -> set[str]:
     return names
 
 
+def assigned_staff_members(state: GameState, mission: Optional[Mission] = None) -> List[Staff]:
+    mission = mission or ensure_mission(state)
+    names = _assigned_staff_names(mission)
+    return [member for member in state.roster if member.name in names]
+
+
+def submission_risk_report(state: GameState) -> Dict[str, object]:
+    mission = ensure_mission(state)
+    warnings: List[str] = []
+    blockers: List[str] = []
+    if not mission.accepted:
+        blockers.append("Terima mission dulu.")
+    if not mission.assigned_translator:
+        blockers.append("Translator belum assign.")
+    missing = [role.role for role in mission.roles if role.role not in mission.assigned_roles]
+    if missing:
+        blockers.append("Role belum assign: " + ", ".join(missing))
+
+    risky_members: List[Dict[str, object]] = []
+    for member in assigned_staff_members(state, mission):
+        level = "ok"
+        if member.energy <= 25 or member.burnout >= 70:
+            level = "critical"
+        elif member.energy <= 40 or member.burnout >= 45:
+            level = "warn"
+        if level != "ok":
+            risky_members.append({
+                "name": member.name,
+                "role_type": member.role_type,
+                "energy": member.energy,
+                "burnout": member.burnout,
+                "level": level,
+            })
+
+    if risky_members:
+        critical = [m for m in risky_members if m["level"] == "critical"]
+        warn = [m for m in risky_members if m["level"] == "warn"]
+        if critical:
+            warnings.append("Critical burnout / low energy detected.")
+        if warn:
+            warnings.append("Some assigned staff are tired and may fail QA.")
+
+    return {
+        "blockers": blockers,
+        "warnings": warnings,
+        "risky_members": risky_members,
+        "has_warning": bool(warnings),
+        "can_submit": not blockers,
+    }
+
+
 def _staff_line(member: Staff, compact: bool = False) -> str:
     rarity_icon = RARITY_ICON.get(member.rarity, "⚪")
     traits = _format_traits(member)
@@ -876,6 +927,33 @@ def mission_summary(mission: Mission) -> str:
         f"Roles:\n{roles}\n\n"
         f"Assignment:\n" + "\n".join(assigned)
     )
+
+
+def submission_risk_text(state: GameState) -> str:
+    report = submission_risk_report(state)
+    mission = ensure_mission(state)
+    lines = [f"⚠️ QA risk check — {mission.code}"]
+    if report["blockers"]:
+        lines.append("Blockers:")
+        for item in report["blockers"]:
+            lines.append(f"- {item}")
+    if report["warnings"]:
+        if report["blockers"]:
+            lines.append("")
+        lines.append("Warnings:")
+        for item in report["warnings"]:
+            lines.append(f"- {item}")
+    risky_members = report.get("risky_members") or []
+    if risky_members:
+        lines.append("")
+        lines.append("Risky staff:")
+        for member in risky_members:
+            lines.append(
+                f"- {member['name']} [{member['role_type']}] energy {member['energy']} | burnout {member['burnout']} | {member['level']}"
+            )
+    if not report["blockers"] and not report["warnings"]:
+        lines.append("All assigned staff look stable for submission.")
+    return "\n".join(lines)
 
 
 def latest_log(state: GameState, limit: int = 8) -> str:

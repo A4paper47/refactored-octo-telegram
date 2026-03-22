@@ -7,9 +7,11 @@ import os
 import threading
 from typing import Any, Optional
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from telegram import Update
 
+from telegram_game.db_integration import count_db_movie_candidates, list_db_missions
+from telegram_game.game_engine import new_game
 from telegram_game.telegram_studio_game_bot import build_game_application
 
 log = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ WEBHOOK_SECRET = (os.getenv("WEBHOOK_SECRET") or "studio-game-webhook").strip()
 TELEGRAM_SECRET_TOKEN = (os.getenv("TELEGRAM_SECRET_TOKEN") or WEBHOOK_SECRET).strip()
 BOT_AUTO_START = os.getenv("BOT_AUTO_START", "1").strip() not in ("0", "false", "False", "")
 BOT_ENABLED = bool(BOT_TOKEN)
+GAME_USE_DB = os.getenv("GAME_USE_DB", "1").strip() not in ("0", "false", "False", "")
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
@@ -197,8 +200,99 @@ if BOT_AUTO_START:
     _ensure_bot_started()
 
 
+def _service_snapshot() -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "service": "studio-dub-tycoon-webhook",
+        "status": "ok" if _bot_started else "starting" if BOT_ENABLED else "disabled",
+        "bot_enabled": BOT_ENABLED,
+        "bot_started": _bot_started,
+        "mode": "webhook",
+        "game_use_db": GAME_USE_DB,
+        "webhook_path": webhook_path(),
+        "render_external_url": RENDER_EXTERNAL_URL or None,
+        "webhook_url": webhook_url() or None,
+        "start_error": _bot_start_error,
+    }
+    if BOT_ENABLED and _bot_started:
+        try:
+            info = run_bot_coro(_get_webhook_info())
+            payload["webhook_info"] = info
+        except Exception as exc:
+            payload["webhook_info_error"] = str(exc)
+    return payload
+
+
+def _dashboard_filters() -> dict[str, Any]:
+    return {
+        "status": (request.args.get("status") or "").strip() or None,
+        "translator": (request.args.get("translator") or "").strip() or None,
+        "priority": (request.args.get("priority") or "").strip() or None,
+        "lang": (request.args.get("lang") or "").strip() or None,
+        "page": max(1, int((request.args.get("page") or "1").strip() or "1")),
+    }
+
+
+def _dashboard_board() -> dict[str, Any]:
+    filters = _dashboard_filters()
+    if not GAME_USE_DB:
+        return {"items": [], "page": 1, "total_pages": 1, "total": 0, "counts": {}, "error": "GAME_USE_DB=0, mission board DB dimatikan."}
+    try:
+        state = new_game(user_id=0, studio_name="Render Dashboard")
+        payload = list_db_missions(
+            state,
+            limit=12,
+            status=filters["status"],
+            translator=filters["translator"],
+            priority=filters["priority"],
+            lang=filters["lang"],
+            page=filters["page"],
+            include_meta=True,
+        )
+        payload["counts"] = {
+            "NEW": count_db_movie_candidates(status="NEW"),
+            "IN_PROGRESS": count_db_movie_candidates(status="IN_PROGRESS"),
+            "READY": count_db_movie_candidates(status="READY"),
+            "COMPLETED": count_db_movie_candidates(status="COMPLETED"),
+        }
+        payload["error"] = None
+        return payload
+    except Exception as exc:
+        return {"items": [], "page": filters["page"], "total_pages": 1, "total": 0, "counts": {}, "error": str(exc)}
+
+
 @app.route("/")
 def index():
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/dashboard")
+@app.route("/dashboard/")
+def dashboard():
+    return render_template(
+        "render_dashboard.html",
+        service=_service_snapshot(),
+        board=_dashboard_board(),
+        filters=_dashboard_filters(),
+        setup_path=url_for("setup_webhook_route"),
+        webhook_info_path=url_for("webhook_info_route"),
+        delete_webhook_path=url_for("delete_webhook_route"),
+        api_status_path=url_for("api_status"),
+        api_missions_path=url_for("api_missions"),
+        health_path=url_for("health"),
+    )
+
+
+@app.route("/api/status")
+def api_status():
+    return jsonify(_service_snapshot())
+
+
+@app.route("/api/missions")
+def api_missions():
+    payload = _dashboard_board()
+    payload["filters"] = _dashboard_filters()
+    return jsonify(payload)
+
     return jsonify(
         {
             "service": "studio-dub-tycoon-webhook",
