@@ -52,6 +52,40 @@ UPGRADE_ALIASES = {
     "rest": "lounge",
 }
 
+RARITY_MULTIPLIER = {
+    "common": 1.00,
+    "rare": 1.08,
+    "epic": 1.18,
+    "legend": 1.30,
+}
+
+RARITY_ICON = {
+    "common": "⚪",
+    "rare": "🔵",
+    "epic": "🟣",
+    "legend": "🟡",
+}
+
+TRAIT_POOL = {
+    "translator": ["polyglot", "sprinter", "perfectionist", "veteran", "workhorse", "resilient"],
+    "male": ["charmer", "natural", "sprinter", "veteran", "workhorse", "resilient"],
+    "female": ["charmer", "natural", "sprinter", "veteran", "workhorse", "resilient"],
+}
+
+CLIENT_POOL = [
+    {"name": "Indie Spark", "tier": "indie", "reward_mult": 0.95, "xp_bonus": 0, "rep": 1},
+    {"name": "Silver Lantern", "tier": "broadcast", "reward_mult": 1.00, "xp_bonus": 4, "rep": 1},
+    {"name": "Nova Stream", "tier": "premium", "reward_mult": 1.12, "xp_bonus": 8, "rep": 2},
+    {"name": "Titan Global", "tier": "enterprise", "reward_mult": 1.25, "xp_bonus": 12, "rep": 3},
+]
+
+CLIENT_UNLOCK_REP = {
+    "indie": 0,
+    "broadcast": 6,
+    "premium": 16,
+    "enterprise": 30,
+}
+
 
 @dataclass
 class Staff:
@@ -64,9 +98,14 @@ class Staff:
     hire_cost: int = 0
     salary: int = 0
     source: str = "game"
+    rarity: str = "common"
+    traits: List[str] = field(default_factory=list)
+    burnout: int = 0
 
     def power(self) -> float:
-        return self.skill * 1.4 + self.speed * 1.1 + self.level * 4 + self.energy * 0.08
+        rarity_bonus = RARITY_MULTIPLIER.get(self.rarity, 1.0)
+        burnout_penalty = min(24.0, self.burnout * 0.32)
+        return (self.skill * 1.4 + self.speed * 1.1 + self.level * 4 + self.energy * 0.08) * rarity_bonus - burnout_penalty
 
 
 @dataclass
@@ -93,6 +132,9 @@ class Mission:
     assigned_roles: Dict[str, str] = field(default_factory=dict)
     accepted: bool = False
     source: str = "generated"
+    client_name: str = "Indie Spark"
+    client_tier: str = "indie"
+    reputation_reward: int = 1
 
 
 @dataclass
@@ -110,6 +152,8 @@ class GameState:
     market: List[Staff] = field(default_factory=list)
     upgrades: Dict[str, int] = field(default_factory=lambda: dict(UPGRADE_DEFAULTS))
     log: List[str] = field(default_factory=list)
+    reputation: int = 10
+    clients_seen: List[str] = field(default_factory=list)
 
     def level(self) -> int:
         return 1 + self.xp // 120
@@ -119,18 +163,40 @@ def _role_gender(role: str) -> str:
     return "male" if role.startswith("man") else "female"
 
 
-def _hire_cost_for(role_type: str, skill: int, speed: int, level: int) -> int:
+def _hire_cost_for(role_type: str, skill: int, speed: int, level: int, rarity: str = "common") -> int:
     base = 26 + skill + speed + level * 16
     if role_type == "translator":
         base += 18
+    base *= RARITY_MULTIPLIER.get(rarity, 1.0)
     return int(round(base / 3.0))
 
 
-def _salary_for(hire_cost: int, level: int) -> int:
-    return max(4, hire_cost // 18 + max(0, level - 1))
+def _salary_for(hire_cost: int, level: int, rarity: str = "common") -> int:
+    base = max(4, hire_cost // 18 + max(0, level - 1))
+    return int(round(base * (1 + max(0.0, RARITY_MULTIPLIER.get(rarity, 1.0) - 1.0) * 0.6)))
 
 
-def _starter_staff(name: str, role_type: str, skill: int, speed: int, level: int = 1) -> Staff:
+def _pick_traits(role_type: str, rnd: random.Random, rarity: str, forced_count: Optional[int] = None) -> List[str]:
+    pool = list(TRAIT_POOL.get(role_type, []))
+    if not pool:
+        return []
+    default_count = {
+        "common": rnd.choice([0, 1]),
+        "rare": 1,
+        "epic": 2,
+        "legend": 2,
+    }[rarity]
+    count = forced_count if forced_count is not None else default_count
+    count = max(0, min(count, len(pool)))
+    rnd.shuffle(pool)
+    return sorted(pool[:count])
+
+
+def _starter_staff(name: str, role_type: str, skill: int, speed: int, level: int = 1, seed: int = 0) -> Staff:
+    rnd = random.Random(seed + len(name) * 17 + level * 5)
+    rarity = "rare" if rnd.random() < 0.18 else "common"
+    skill = min(95, int(round(skill * (1 + (RARITY_MULTIPLIER[rarity] - 1) * 0.35))) + (1 if rarity != "common" else 0))
+    speed = min(92, int(round(speed * (1 + (RARITY_MULTIPLIER[rarity] - 1) * 0.30))) + (1 if rarity == "rare" else 0))
     hire_cost = 0
     salary = max(4, (skill + speed) // 28 + level)
     return Staff(
@@ -143,6 +209,9 @@ def _starter_staff(name: str, role_type: str, skill: int, speed: int, level: int
         hire_cost=hire_cost,
         salary=salary,
         source="starter",
+        rarity=rarity,
+        traits=_pick_traits(role_type, rnd, rarity),
+        burnout=0,
     )
 
 
@@ -150,11 +219,11 @@ def _make_default_roster() -> List[Staff]:
     roster: List[Staff] = []
     rnd = random.Random(7)
     for name in TRANSLATOR_NAMES[:4]:
-        roster.append(_starter_staff(name=name, role_type="translator", skill=rnd.randint(45, 70), speed=rnd.randint(45, 70)))
+        roster.append(_starter_staff(name=name, role_type="translator", skill=rnd.randint(45, 70), speed=rnd.randint(45, 70), seed=101))
     for name in VO_NAMES_MALE[:4]:
-        roster.append(_starter_staff(name=name, role_type="male", skill=rnd.randint(40, 72), speed=rnd.randint(40, 72)))
+        roster.append(_starter_staff(name=name, role_type="male", skill=rnd.randint(40, 72), speed=rnd.randint(40, 72), seed=202))
     for name in VO_NAMES_FEMALE[:4]:
-        roster.append(_starter_staff(name=name, role_type="female", skill=rnd.randint(40, 72), speed=rnd.randint(40, 72)))
+        roster.append(_starter_staff(name=name, role_type="female", skill=rnd.randint(40, 72), speed=rnd.randint(40, 72), seed=303))
     return roster
 
 
@@ -175,6 +244,20 @@ def _unique_name(name: str, existing: set[str]) -> str:
     return f"{name} {idx}"
 
 
+def _pick_rarity(rnd: random.Random, studio_tier: int, level: int) -> str:
+    weights = {
+        "common": 68,
+        "rare": 24,
+        "epic": 7,
+        "legend": 1,
+    }
+    weights["common"] = max(32, weights["common"] - studio_tier * 4 - min(14, level * 2))
+    weights["rare"] = min(40, weights["rare"] + studio_tier * 3 + min(10, level))
+    weights["epic"] = min(20, weights["epic"] + max(0, studio_tier - 1) * 2 + max(0, level - 2))
+    weights["legend"] = min(8, weights["legend"] + max(0, studio_tier - 2) + max(0, level - 4) // 2)
+    return rnd.choices(list(weights.keys()), weights=list(weights.values()), k=1)[0]
+
+
 def total_salary(state: GameState) -> int:
     return sum(max(0, member.salary) for member in state.roster)
 
@@ -182,7 +265,67 @@ def total_salary(state: GameState) -> int:
 def _market_seed(state: GameState, seed: Optional[int] = None) -> int:
     if seed is not None:
         return seed
-    return state.user_id * 1009 + state.day * 97 + state.studio_tier * 31 + state.level() * 13
+    return state.user_id * 1009 + state.day * 97 + state.studio_tier * 31 + state.level() * 13 + state.reputation * 19
+
+
+def _format_traits(member: Staff) -> str:
+    return ", ".join(member.traits) if member.traits else "-"
+
+
+def _trait_bonus(member: Staff, mission: Mission, role: Optional[RoleSlot] = None, translator: bool = False) -> float:
+    traits = set(member.traits)
+    bonus = 0.0
+    if "polyglot" in traits and translator:
+        bonus += 8.0 if mission.lang in {"bn", "ms"} else 5.0
+    if "sprinter" in traits and mission.priority in {"urgent", "superurgent"}:
+        bonus += 7.0
+    if "perfectionist" in traits:
+        bonus += 5.5
+    if "natural" in traits and role is not None:
+        bonus += min(8.0, role.lines / 48.0)
+    if "charmer" in traits and not translator:
+        bonus += 5.0
+    if "veteran" in traits:
+        bonus += 6.0
+    if "workhorse" in traits:
+        bonus += 4.0
+    if "resilient" in traits:
+        bonus += max(0.0, 6.0 - member.burnout * 0.08)
+    if mission.client_tier in {"premium", "enterprise"} and "perfectionist" in traits:
+        bonus += 3.0
+    return bonus
+
+
+def _burnout_penalty(member: Staff) -> float:
+    penalty = member.burnout * 0.36
+    if "resilient" in member.traits:
+        penalty *= 0.65
+    return min(28.0, penalty)
+
+
+def _client_for_state(state: GameState, rnd: random.Random) -> dict:
+    unlocked = [client for client in CLIENT_POOL if state.reputation >= CLIENT_UNLOCK_REP.get(client["tier"], 0)]
+    if not unlocked:
+        unlocked = [CLIENT_POOL[0]]
+    weights = []
+    for client in unlocked:
+        base = {
+            "indie": 40,
+            "broadcast": 30,
+            "premium": 18,
+            "enterprise": 8,
+        }[client["tier"]]
+        base += state.studio_tier * 2
+        if client["tier"] in {"premium", "enterprise"}:
+            base += max(0, state.reputation - CLIENT_UNLOCK_REP[client["tier"]])
+        weights.append(base)
+    return rnd.choices(unlocked, weights=weights, k=1)[0]
+
+
+def _remember_client(state: GameState, client_name: str) -> None:
+    if client_name and client_name not in state.clients_seen:
+        state.clients_seen.append(client_name)
+        state.clients_seen.sort()
 
 
 def generate_market(state: GameState, seed: Optional[int] = None, count: Optional[int] = None) -> List[Staff]:
@@ -193,13 +336,17 @@ def generate_market(state: GameState, seed: Optional[int] = None, count: Optiona
     role_choices = ["translator", "male", "female", "male", "female"]
     for _ in range(count):
         role_type = rnd.choice(role_choices)
+        rarity = _pick_rarity(rnd, state.studio_tier, state.level())
+        rarity_mult = RARITY_MULTIPLIER[rarity]
         base_skill = rnd.randint(44, 62) + state.studio_tier * 2 + min(8, state.level())
         base_speed = rnd.randint(42, 64) + state.studio_tier * 2 + min(6, state.day // 2)
         level = 1 + min(4, (state.studio_tier - 1) + rnd.randint(0, max(1, state.level() // 2)))
         if role_type == "translator":
             base_skill += 4
-        hire_cost = _hire_cost_for(role_type, base_skill, base_speed, level)
-        salary = _salary_for(hire_cost, level)
+        skill = min(97, int(round(base_skill * (1 + (rarity_mult - 1) * 0.55))))
+        speed = min(94, int(round(base_speed * (1 + (rarity_mult - 1) * 0.45))))
+        hire_cost = _hire_cost_for(role_type, skill, speed, level, rarity=rarity)
+        salary = _salary_for(hire_cost, level, rarity=rarity)
         raw_name = rnd.choice(_all_name_pool(role_type))
         name = _unique_name(raw_name, existing)
         existing.add(name)
@@ -207,16 +354,19 @@ def generate_market(state: GameState, seed: Optional[int] = None, count: Optiona
             Staff(
                 name=name,
                 role_type=role_type,
-                skill=min(95, base_skill),
-                speed=min(92, base_speed),
+                skill=skill,
+                speed=speed,
                 energy=100,
                 level=level,
                 hire_cost=hire_cost,
                 salary=salary,
                 source="market",
+                rarity=rarity,
+                traits=_pick_traits(role_type, rnd, rarity),
+                burnout=0,
             )
         )
-    market.sort(key=lambda member: (member.role_type, member.hire_cost, member.power()), reverse=True)
+    market.sort(key=lambda member: (RARITY_MULTIPLIER.get(member.rarity, 1.0), member.hire_cost, member.power()), reverse=True)
     return market
 
 
@@ -227,7 +377,7 @@ def refresh_market(state: GameState, seed: Optional[int] = None) -> List[Staff]:
 
 
 def new_game(user_id: int, studio_name: str = "Studio Baru") -> GameState:
-    state = GameState(user_id=user_id, studio_name=studio_name, roster=_make_default_roster())
+    state = GameState(user_id=user_id, studio_name=studio_name, roster=_make_default_roster(), reputation=10)
     refresh_market(state)
     state.log.append("Studio dibuka. Misi pertama menunggu.")
     return state
@@ -242,9 +392,10 @@ def _mission_title(rnd: random.Random) -> str:
 
 
 def generate_mission(state: GameState, seed: Optional[int] = None) -> Mission:
-    rnd = random.Random(seed if seed is not None else (state.user_id * 1000 + state.day * 17 + state.level()))
+    rnd = random.Random(seed if seed is not None else (state.user_id * 1000 + state.day * 17 + state.level() + state.reputation * 7))
     priority = rnd.choices(PRIORITIES, weights=[10, 30, 35, 25], k=1)[0]
     lang = rnd.choice(LANGS)
+    client = _client_for_state(state, rnd)
     year = rnd.randint(2018, 2026)
     role_count = rnd.randint(2, min(5, 2 + state.level() + max(0, state.studio_tier - 1)))
     roles: List[RoleSlot] = []
@@ -255,11 +406,12 @@ def generate_mission(state: GameState, seed: Optional[int] = None) -> Mission:
         roles.append(RoleSlot(role=f"{prefix}{idx}", lines=lines, gender=gender))
 
     reward = 60 + sum(r.lines for r in roles) // 5 + (10 * state.level()) + state.studio_tier * 6
-    xp = 25 + len(roles) * 8 + (15 if priority == "superurgent" else 0)
+    reward = int(round(reward * client["reward_mult"]))
+    xp = 25 + len(roles) * 8 + (15 if priority == "superurgent" else 0) + client["xp_bonus"]
     deadline_day = state.day + PRIORITY_DEADLINES[priority]
     translator_difficulty = 45 + len(roles) * 6 + (15 if priority in {"superurgent", "urgent"} else 0)
     qa_threshold = 55 + len(roles) * 5 + (10 if priority == "superurgent" else 0)
-    return Mission(
+    mission = Mission(
         code=_next_code(state.day, lang),
         title=_mission_title(rnd),
         year=year,
@@ -271,12 +423,18 @@ def generate_mission(state: GameState, seed: Optional[int] = None) -> Mission:
         translator_difficulty=translator_difficulty,
         qa_threshold=qa_threshold,
         roles=roles,
+        client_name=client["name"],
+        client_tier=client["tier"],
+        reputation_reward=client["rep"],
     )
+    _remember_client(state, mission.client_name)
+    return mission
 
 
 def ensure_mission(state: GameState) -> Mission:
     if state.current_mission is None:
         state.current_mission = generate_mission(state)
+    _remember_client(state, state.current_mission.client_name)
     return state.current_mission
 
 
@@ -301,7 +459,10 @@ def auto_cast(state: GameState) -> Dict[str, str]:
     picks: Dict[str, str] = {}
     translator_pool = [s for s in state.roster if s.role_type == "translator" and s.energy > 0]
     if translator_pool:
-        best_translator = max(translator_pool, key=lambda s: s.power())
+        best_translator = max(
+            translator_pool,
+            key=lambda s: s.power() + _trait_bonus(s, mission, translator=True) - _burnout_penalty(s),
+        )
         mission.assigned_translator = best_translator.name
         picks["translator"] = best_translator.name
 
@@ -310,7 +471,7 @@ def auto_cast(state: GameState) -> Dict[str, str]:
         pool = [s for s in state.roster if s.role_type == role.gender and s.energy > 0 and s.name not in used]
         if not pool:
             continue
-        best = max(pool, key=lambda s: s.power())
+        best = max(pool, key=lambda s: s.power() + _trait_bonus(s, mission, role=role) - _burnout_penalty(s))
         mission.assigned_roles[role.role] = best.name
         used.add(best.name)
         picks[role.role] = best.name
@@ -350,7 +511,7 @@ def clear_assignments(state: GameState) -> Mission:
 def accept_mission(state: GameState) -> Mission:
     mission = ensure_mission(state)
     mission.accepted = True
-    state.log.append(f"Terima misi {mission.code}.")
+    state.log.append(f"Terima misi {mission.code} untuk client {mission.client_name}.")
     return mission
 
 
@@ -361,7 +522,15 @@ def _translator_score(state: GameState, mission: Mission) -> float:
     if not tr:
         return 0.0
     bonus = state.upgrades.get("translator_lab", 0) * 2.5
-    return tr.skill * 0.9 + tr.speed * 0.6 + tr.level * 5 + bonus - max(0, mission.translator_difficulty - tr.skill) * 0.4
+    return (
+        tr.skill * 0.9
+        + tr.speed * 0.6
+        + tr.level * 5
+        + bonus
+        + _trait_bonus(tr, mission, translator=True)
+        - max(0, mission.translator_difficulty - tr.skill) * 0.4
+        - _burnout_penalty(tr)
+    )
 
 
 def _vo_score(state: GameState, mission: Mission) -> float:
@@ -377,7 +546,14 @@ def _vo_score(state: GameState, mission: Mission) -> float:
         if not vo:
             return 0.0
         role_weight = 1 + role.lines / 120.0
-        total += (vo.skill * 0.85 + vo.speed * 0.5 + vo.level * 4 + booth_bonus) / role_weight
+        total += (
+            vo.skill * 0.85
+            + vo.speed * 0.5
+            + vo.level * 4
+            + booth_bonus
+            + _trait_bonus(vo, mission, role=role)
+            - _burnout_penalty(vo)
+        ) / role_weight
     return total / len(mission.roles)
 
 
@@ -390,11 +566,27 @@ def _consume_energy(state: GameState, mission: Mission) -> None:
     names = set(mission.assigned_roles.values())
     if mission.assigned_translator:
         names.add(mission.assigned_translator)
+    urgent_load = 4 if mission.priority in {"urgent", "superurgent"} else 0
     for member in state.roster:
         if member.name in names:
-            member.energy = max(10, member.energy - 18)
+            drain = 18 + urgent_load
+            if "workhorse" in member.traits:
+                drain -= 4
+            member.energy = max(10, member.energy - drain)
+            burnout_gain = 0
+            if member.energy <= 55:
+                burnout_gain += 8
+            if member.energy <= 35:
+                burnout_gain += 7
+            if mission.client_tier in {"premium", "enterprise"}:
+                burnout_gain += 2
+            if "resilient" in member.traits:
+                burnout_gain = max(0, burnout_gain - 4)
+            member.burnout = min(100, member.burnout + burnout_gain)
         else:
-            member.energy = min(100, member.energy + 8)
+            recover = 8 + state.upgrades.get("lounge", 0) * 2
+            member.energy = min(100, member.energy + recover)
+            member.burnout = max(0, member.burnout - (5 + state.upgrades.get("lounge", 0) * 2))
 
 
 def resolve_submission(state: GameState) -> Dict[str, object]:
@@ -414,16 +606,25 @@ def resolve_submission(state: GameState) -> Dict[str, object]:
 
     reward = mission.reward if passed else max(15, mission.reward // 5)
     gained_xp = mission.xp if passed else max(8, mission.xp // 4)
+    rep_change = mission.reputation_reward if passed else -max(1, mission.reputation_reward)
+    if mission.client_tier == "enterprise" and passed:
+        rep_change += 1
+
     state.coins += reward
     state.xp += gained_xp
+    state.reputation = max(0, state.reputation + rep_change)
     state.wins += 1 if passed else 0
     state.losses += 0 if passed else 1
     _consume_energy(state, mission)
 
     if passed:
-        state.log.append(f"Misi {mission.code} lulus QA. +{reward} coins, +{gained_xp} XP")
+        state.log.append(
+            f"Misi {mission.code} lulus QA untuk {mission.client_name}. +{reward} coins, +{gained_xp} XP, rep {rep_change:+d}"
+        )
     else:
-        state.log.append(f"Misi {mission.code} gagal QA. +{reward} coins saguhati, +{gained_xp} XP")
+        state.log.append(
+            f"Misi {mission.code} gagal QA untuk {mission.client_name}. +{reward} coins saguhati, +{gained_xp} XP, rep {rep_change:+d}"
+        )
 
     result = {
         "passed": passed,
@@ -433,6 +634,10 @@ def resolve_submission(state: GameState) -> Dict[str, object]:
         "xp": gained_xp,
         "code": mission.code,
         "title": mission.title,
+        "reputation": state.reputation,
+        "rep_change": rep_change,
+        "client_name": mission.client_name,
+        "client_tier": mission.client_tier,
     }
     state.current_mission = None
     return result
@@ -447,7 +652,7 @@ def hire_staff(state: GameState, staff_name: str) -> Staff:
     state.coins -= candidate.hire_cost
     state.roster.append(candidate)
     state.market = [member for member in state.market if member.name.lower() != candidate.name.lower()]
-    state.log.append(f"Hire {candidate.name} [{candidate.role_type}] dengan kos {candidate.hire_cost}.")
+    state.log.append(f"Hire {candidate.name} [{candidate.role_type}] {candidate.rarity} dengan kos {candidate.hire_cost}.")
     return candidate
 
 
@@ -488,6 +693,7 @@ def upgrade_studio(state: GameState, target: str) -> Dict[str, object]:
 
     if normalized == "studio":
         state.studio_tier += 1
+        state.reputation += 1
         refresh_market(state)
         state.log.append(f"Studio expand ke tier {state.studio_tier}. Kos {cost}.")
         return {"target": "studio", "cost": cost, "level": state.studio_tier}
@@ -514,6 +720,7 @@ def upgrade_studio(state: GameState, target: str) -> Dict[str, object]:
         state.upgrades["lounge"] = state.upgrades.get("lounge", 0) + 1
         for member in state.roster:
             member.energy = min(100, member.energy + 12)
+            member.burnout = max(0, member.burnout - 6)
         state.log.append(f"Lounge naik ke lvl {state.upgrades['lounge']}. Kos {cost}.")
         return {"target": normalized, "cost": cost, "level": state.upgrades[normalized]}
 
@@ -526,13 +733,17 @@ def next_day(state: GameState) -> None:
     had_payroll_shortage = state.coins < payroll
     state.coins = max(0, state.coins - payroll)
     recovery = 12 + state.upgrades.get("lounge", 0) * 4
+    burnout_recovery = 9 + state.upgrades.get("lounge", 0) * 3
     for member in state.roster:
         member.energy = min(100, member.energy + recovery)
+        member.burnout = max(0, member.burnout - burnout_recovery)
         if had_payroll_shortage:
             member.energy = max(10, member.energy - 8)
+            member.burnout = min(100, member.burnout + 5)
     refresh_market(state)
     if had_payroll_shortage:
-        state.log.append(f"Hari {state.day} bermula. Payroll {payroll} tak cukup, morale jatuh.")
+        state.reputation = max(0, state.reputation - 1)
+        state.log.append(f"Hari {state.day} bermula. Payroll {payroll} tak cukup, morale jatuh dan rep -1.")
     else:
         state.log.append(f"Hari {state.day} bermula. Payroll dibayar: {payroll}.")
 
@@ -544,23 +755,36 @@ def _assigned_staff_names(mission: Mission) -> set[str]:
     return names
 
 
+def _staff_line(member: Staff, compact: bool = False) -> str:
+    rarity_icon = RARITY_ICON.get(member.rarity, "⚪")
+    traits = _format_traits(member)
+    if compact:
+        return (
+            f"{rarity_icon} {member.name}: power {round(member.power(), 1)}, energy {member.energy}, "
+            f"burnout {member.burnout}, lvl {member.level}, traits {traits}"
+        )
+    return (
+        f"- {rarity_icon} {member.name}: skill {member.skill}, speed {member.speed}, energy {member.energy}, "
+        f"burnout {member.burnout}, lvl {member.level}, rarity {member.rarity}, salary {member.salary}, traits {traits}"
+    )
+
+
 def roster_summary(state: GameState) -> str:
     lines = [
         f"🏢 {state.studio_name} — Day {state.day} — Coins {state.coins} — XP {state.xp} — Level {state.level()}",
-        f"Studio tier {state.studio_tier} | Payroll {total_salary(state)} | Upgrades T{state.upgrades.get('translator_lab', 0)} / V{state.upgrades.get('vo_booth', 0)} / L{state.upgrades.get('lounge', 0)}",
+        f"Studio tier {state.studio_tier} | Payroll {total_salary(state)} | Reputation {state.reputation} | Upgrades T{state.upgrades.get('translator_lab', 0)} / V{state.upgrades.get('vo_booth', 0)} / L{state.upgrades.get('lounge', 0)}",
     ]
     for kind, label in [("translator", "Translator"), ("male", "VO Male"), ("female", "VO Female")]:
         lines.append(f"\n{label}:")
         for member in [s for s in state.roster if s.role_type == kind]:
-            lines.append(
-                f"- {member.name}: skill {member.skill}, speed {member.speed}, energy {member.energy}, lvl {member.level}, salary {member.salary}"
-            )
+            lines.append(_staff_line(member))
     return "\n".join(lines)
 
 
 def current_team_summary(state: GameState) -> str:
     mission = ensure_mission(state)
     lines = [f"🎯 Team untuk mission {mission.code} — {mission.title}"]
+    lines.append(f"Client: {mission.client_name} [{mission.client_tier}] | Rep reward {mission.reputation_reward}")
     lines.append(f"Translator: {mission.assigned_translator or '-'}")
     for role in mission.roles:
         lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')}")
@@ -569,9 +793,7 @@ def current_team_summary(state: GameState) -> str:
         lines.append("")
         lines.append("Staff on mission:")
         for member in sorted((s for s in state.roster if s.name in assigned_names), key=lambda s: (s.role_type, s.name.lower())):
-            lines.append(
-                f"- {member.name} [{member.role_type}] power {round(member.power(), 1)} | energy {member.energy} | lvl {member.level}"
-            )
+            lines.append(f"- {_staff_line(member, compact=True)}")
     else:
         lines.append("")
         lines.append("Belum ada staff assign lagi.")
@@ -588,28 +810,27 @@ def bench_summary(state: GameState) -> str:
         if not bench:
             lines.append("- kosong")
             continue
-        bench = sorted(bench, key=lambda s: (s.energy, s.power(), s.level), reverse=True)
+        bench = sorted(bench, key=lambda s: (s.energy - s.burnout, s.power(), s.level), reverse=True)
         for member in bench:
-            lines.append(
-                f"- {member.name}: power {round(member.power(), 1)}, skill {member.skill}, speed {member.speed}, energy {member.energy}, lvl {member.level}"
-            )
+            lines.append(f"- {_staff_line(member, compact=True)}")
     return "\n".join(lines)
 
 
 def market_summary(state: GameState) -> str:
     if not state.market:
         return "🛒 Market kosong. Guna /nextday untuk refresh."
-    lines = [f"🛒 Recruitment market — Day {state.day} — Studio tier {state.studio_tier}"]
+    lines = [f"🛒 Recruitment market — Day {state.day} — Studio tier {state.studio_tier} — Reputation {state.reputation}"]
     for kind, label in [("translator", "Translator recruits"), ("male", "VO Male recruits"), ("female", "VO Female recruits")]:
         lines.append(f"\n{label}:")
         items = [s for s in state.market if s.role_type == kind]
         if not items:
             lines.append("- kosong")
             continue
-        items = sorted(items, key=lambda s: (s.hire_cost, s.power()), reverse=True)
+        items = sorted(items, key=lambda s: (RARITY_MULTIPLIER.get(s.rarity, 1.0), s.hire_cost, s.power()), reverse=True)
         for member in items:
+            rarity_icon = RARITY_ICON.get(member.rarity, "⚪")
             lines.append(
-                f"- {member.name}: power {round(member.power(), 1)}, skill {member.skill}, speed {member.speed}, lvl {member.level}, hire {member.hire_cost}, salary {member.salary}"
+                f"- {rarity_icon} {member.name}: rarity {member.rarity}, power {round(member.power(), 1)}, skill {member.skill}, speed {member.speed}, lvl {member.level}, hire {member.hire_cost}, salary {member.salary}, traits {_format_traits(member)}"
             )
     return "\n".join(lines)
 
@@ -619,13 +840,16 @@ def studio_summary(state: GameState) -> str:
     vo_cost = _upgrade_cost(state, "vo_booth")
     lounge_cost = _upgrade_cost(state, "lounge")
     studio_cost = _upgrade_cost(state, "studio")
+    unlocked_tiers = ", ".join(sorted({c["tier"] for c in CLIENT_POOL if state.reputation >= CLIENT_UNLOCK_REP[c["tier"]]}))
     return (
         f"🏢 {state.studio_name}\n"
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()}\n"
         f"Wins {state.wins} | Losses {state.losses}\n"
         f"Studio tier: {state.studio_tier}\n"
+        f"Reputation: {state.reputation}\n"
         f"Payroll per day: {total_salary(state)}\n"
-        f"Roster size: {len(state.roster)} | Market size: {len(state.market)}\n\n"
+        f"Roster size: {len(state.roster)} | Market size: {len(state.market)}\n"
+        f"Unlocked client tiers: {unlocked_tiers or 'indie'}\n\n"
         f"Upgrades:\n"
         f"- translator_lab lvl {state.upgrades.get('translator_lab', 0)} (next {translator_cost})\n"
         f"- vo_booth lvl {state.upgrades.get('vo_booth', 0)} (next {vo_cost})\n"
@@ -643,10 +867,11 @@ def mission_summary(mission: Mission) -> str:
     return (
         f"🎬 {mission.title} ({mission.year})\n"
         f"Code: {mission.code}\n"
+        f"Client: {mission.client_name} [{mission.client_tier}]\n"
         f"Lang: {mission.lang.upper()}\n"
         f"Priority: {mission.priority}\n"
         f"Deadline day: {mission.deadline_day}\n"
-        f"Reward: {mission.reward} coins | XP: {mission.xp}\n"
+        f"Reward: {mission.reward} coins | XP: {mission.xp} | Rep: {mission.reputation_reward}\n"
         f"Source: {mission.source}\n\n"
         f"Roles:\n{roles}\n\n"
         f"Assignment:\n" + "\n".join(assigned)
@@ -656,6 +881,36 @@ def mission_summary(mission: Mission) -> str:
 def latest_log(state: GameState, limit: int = 8) -> str:
     items = state.log[-limit:]
     return "\n".join(f"- {item}" for item in items) if items else "- Tiada log"
+
+
+def client_summary(state: GameState) -> str:
+    current = ensure_mission(state)
+    lines = [
+        f"🤝 Client desk — Reputation {state.reputation}",
+        f"Current mission client: {current.client_name} [{current.client_tier}]",
+        "",
+        "Known clients:",
+    ]
+    if not state.clients_seen:
+        lines.append("- Belum ada client direkod.")
+    else:
+        for client in CLIENT_POOL:
+            if client["name"] in state.clients_seen or state.reputation >= CLIENT_UNLOCK_REP[client["tier"]]:
+                lines.append(
+                    f"- {client['name']} [{client['tier']}] — reward x{client['reward_mult']} | rep +{client['rep']}"
+                )
+    return "\n".join(lines)
+
+
+def reputation_summary(state: GameState) -> str:
+    unlocked = [client["name"] for client in CLIENT_POOL if state.reputation >= CLIENT_UNLOCK_REP[client["tier"]]]
+    return (
+        f"⭐ Reputation board\n"
+        f"Studio: {state.studio_name}\n"
+        f"Reputation: {state.reputation}\n"
+        f"Wins/Losses: {state.wins}/{state.losses}\n"
+        f"Unlocked clients: {', '.join(unlocked) if unlocked else 'Indie Spark'}"
+    )
 
 
 def save_state(state: GameState, path: Path) -> None:
@@ -696,7 +951,11 @@ def load_state(path: Path) -> Optional[GameState]:
         market=market,
         upgrades=upgrades,
         log=data.get("log", []),
+        reputation=data.get("reputation", 10),
+        clients_seen=data.get("clients_seen", []),
     )
+    if state.current_mission is not None:
+        _remember_client(state, state.current_mission.client_name)
     if not state.market:
         refresh_market(state)
     return state

@@ -224,3 +224,43 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 
 - local JSON save masih sesuai untuk test, tapi pada free web service Render filesystem ialah sementara
 - jadi untuk progression game jangka panjang, lebih elok guna DB/persistent disk bila masuk fasa live sebenar
+
+## V9 Update — Rarity, Traits, Burnout, Reputation, Clients
+
+Sekarang gameplay dah lebih dekat dengan **studio management game** sebenar.
+
+### Apa yang ditambah
+
+- setiap staff sekarang ada:
+  - `rarity` (`common`, `rare`, `epic`, `legend`)
+  - `traits` seperti `polyglot`, `sprinter`, `perfectionist`, `natural`, `veteran`, `workhorse`, `resilient`, `charmer`
+  - `burnout`
+- setiap mission sekarang ada:
+  - `client_name`
+  - `client_tier`
+  - `reputation_reward`
+- `reputation` studio mempengaruhi client tier yang boleh muncul
+- success / failure mission sekarang ubah reputation
+- `next_day` akan recover energy + turunkan burnout
+- payroll shortage sekarang boleh jatuhkan reputation
+- command baru:
+  - `/clients`
+  - `/reputation`
+- summary `/mission`, `/team`, `/market`, `/roster`, `/studio`, `/status`, dan `/submit` sekarang tunjuk layer baru ini
+
+### Kesan gameplay
+
+- staff bukan lagi sekadar nombor skill/speed biasa
+- urgent mission boleh lebih sesuai untuk staff tertentu ikut trait
+- staff kuat tapi burnout tinggi tak semestinya pilihan terbaik
+- client premium / enterprise jadi sasaran progression jangka panjang
+- reputation sekarang jadi metrik penting, bukan coins saja
+
+### Status ujian terkini
+
+- `telegram_game/test_game_engine.py` ✅
+- `telegram_game/test_db_integration.py` ✅
+- `telegram_game/test_render_web_service.py` ✅
+- `telegram_game/test_bot_callback.py` ✅
+- `python -m py_compile telegram_game/*.py render_game_web.py` ✅
+- total: **31 passed**

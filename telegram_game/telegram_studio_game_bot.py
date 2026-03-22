@@ -23,6 +23,7 @@ from telegram_game.game_engine import (
     assign_translator,
     auto_cast,
     bench_summary,
+    client_summary,
     clear_assignments,
     current_team_summary,
     ensure_mission,
@@ -31,6 +32,7 @@ from telegram_game.game_engine import (
     latest_log,
     load_state,
     market_summary,
+    reputation_summary,
     mission_summary,
     new_game,
     next_day,
@@ -118,6 +120,7 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
         [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench")],
         [InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🏢 Studio", callback_data="g|studio")],
+        [InlineKeyboardButton("🤝 Clients", callback_data="g|clients"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
         [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("👤 Roster", callback_data="g|roster")],
         [InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
@@ -145,6 +148,8 @@ def _help_text() -> str:
         "/hire <nama> — ambil staff baru dari market\n"
         "/fire <nama> — buang staff\n"
         "/studio — status studio + kos upgrade\n"
+        "/clients — tengok client desk dan client unlock\n"
+        "/reputation — tengok reputasi studio\n"
         "/upgrade <studio|translator|vo|lounge> — beli upgrade\n"
         "/submit — hantar ke QA\n"
         "/roster — tengok semua staff\n"
@@ -573,9 +578,11 @@ async def cmd_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         text = (
             f"{verdict}\n"
             f"Mission: {result['code']} — {result['title']}\n"
+            f"Client: {result['client_name']} [{result['client_tier']}]\n"
             f"Score: {result['qa_score']} / {result['threshold']}\n"
             f"Reward: +{result['reward']} coins\n"
             f"XP: +{result['xp']}\n"
+            f"Reputation: {result['rep_change']:+d} → {result['reputation']}\n"
             f"Studio coins sekarang: {state.coins}"
         )
         if db_info:
@@ -622,6 +629,8 @@ async def cmd_hire(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             text = (
                 f"✅ Hire berjaya: {member.name}\n"
                 f"Role: {member.role_type}\n"
+                f"Rarity: {member.rarity}\n"
+                f"Traits: {', '.join(member.traits) if member.traits else '-'}\n"
                 f"Hire cost: {member.hire_cost}\n"
                 f"Salary/day: {member.salary}\n"
                 f"Coins sekarang: {state.coins}"
@@ -668,6 +677,19 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.effective_message.reply_text(text, reply_markup=_menu())
 
 
+async def cmd_clients(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _ensure_bot_mission(state)
+    _save(state)
+    await update.effective_message.reply_text(client_summary(state), reply_markup=_menu())
+
+
+async def cmd_reputation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(reputation_summary(state), reply_markup=_menu())
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
@@ -675,9 +697,10 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"🏢 {state.studio_name}\n"
         f"Mode: {_mode_label()}\n"
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()}\n"
-        f"Studio tier {state.studio_tier}\n"
+        f"Studio tier {state.studio_tier} | Reputation {state.reputation}\n"
         f"Wins {state.wins} | Losses {state.losses}\n\n"
         f"Current mission:\n{mission.title} ({mission.code})\n"
+        f"Client: {mission.client_name} [{mission.client_tier}]\n"
         f"Mission source: {mission.source}"
     )
     _save(state)
@@ -693,7 +716,7 @@ async def cmd_nextday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     state = _load_or_create(update.effective_user.id)
     next_day(state)
     _save(state)
-    await update.effective_message.reply_text(f"⏭️ Masuk hari {state.day}. Market dan payroll dah update.", reply_markup=_menu())
+    await update.effective_message.reply_text(f"⏭️ Masuk hari {state.day}. Market dan payroll dah update. Reputation: {state.reputation}", reply_markup=_menu())
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -729,6 +752,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "bench": cmd_bench,
         "market": cmd_market,
         "studio": cmd_studio,
+        "clients": cmd_clients,
+        "reputation": cmd_reputation,
         "log": cmd_log,
         "nextday": cmd_nextday,
     }
@@ -766,6 +791,8 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("hire", cmd_hire))
     app.add_handler(CommandHandler("fire", cmd_fire))
     app.add_handler(CommandHandler("studio", cmd_studio))
+    app.add_handler(CommandHandler("clients", cmd_clients))
+    app.add_handler(CommandHandler("reputation", cmd_reputation))
     app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("log", cmd_log))

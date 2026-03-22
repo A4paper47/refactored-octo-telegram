@@ -7,14 +7,17 @@ from telegram_game.game_engine import (
     accept_mission,
     auto_cast,
     bench_summary,
+    client_summary,
     current_team_summary,
     ensure_mission,
     fire_staff,
     hire_staff,
     load_state,
     market_summary,
+    mission_summary,
     new_game,
     next_day,
+    reputation_summary,
     resolve_submission,
     save_state,
     studio_summary,
@@ -27,6 +30,7 @@ def test_generate_and_autocast():
     mission = ensure_mission(state)
     assert mission.code
     assert mission.roles
+    assert mission.client_name
     picks = auto_cast(state)
     assert "translator" in picks
     assert len(mission.assigned_roles) == len(mission.roles)
@@ -34,23 +38,31 @@ def test_generate_and_autocast():
 
 def test_submit_flow_passes_after_accept_and_autocast():
     state = new_game(123, "Test Studio")
+    rep_before = state.reputation
     accept_mission(state)
     auto_cast(state)
     result = resolve_submission(state)
     assert "passed" in result
     assert result["reward"] >= 15
+    assert "rep_change" in result
+    assert state.reputation >= 0
+    if result["passed"]:
+        assert state.reputation >= rep_before
     assert state.current_mission is None
 
 
-def test_next_day_recovers_energy():
+def test_next_day_recovers_energy_and_burnout():
     state = new_game(123, "Test Studio")
     accept_mission(state)
     auto_cast(state)
     resolve_submission(state)
     min_energy_before = min(s.energy for s in state.roster)
+    max_burnout_before = max(s.burnout for s in state.roster)
     next_day(state)
     min_energy_after = min(s.energy for s in state.roster)
+    max_burnout_after = max(s.burnout for s in state.roster)
     assert min_energy_after >= min_energy_before
+    assert max_burnout_after <= max_burnout_before
 
 
 def test_save_and_load_roundtrip():
@@ -68,14 +80,16 @@ def test_save_and_load_roundtrip():
     assert loaded.current_mission.code == state.current_mission.code
     assert loaded.market
     assert loaded.studio_tier == state.studio_tier
+    assert loaded.reputation == state.reputation
 
 
-def test_team_summary_shows_assigned_staff():
+def test_team_summary_shows_assigned_staff_and_client():
     state = new_game(777, "Team Studio")
     accept_mission(state)
     auto_cast(state)
     text = current_team_summary(state)
     assert "Team untuk mission" in text
+    assert "Client:" in text
     assert "Translator:" in text
     assert "Staff on mission:" in text
 
@@ -137,9 +151,29 @@ def test_next_day_refreshes_market_and_updates_payroll_log():
     assert any("Payroll" in entry for entry in state.log[-3:])
 
 
-def test_market_and_studio_summary_show_new_economy_layers():
+def test_market_and_studio_summary_show_new_layers():
     state = new_game(904, "Summary Studio")
-    assert "Recruitment market" in market_summary(state)
+    market = market_summary(state)
+    assert "Recruitment market" in market
+    assert "rarity" in market
     summary = studio_summary(state)
     assert "Payroll per day" in summary
-    assert "translator_lab" in summary
+    assert "Reputation" in summary
+    assert "Unlocked client tiers" in summary
+
+
+def test_client_and_reputation_summary_show_progression():
+    state = new_game(905, "Client Studio")
+    ensure_mission(state)
+    assert "Client desk" in client_summary(state)
+    rep_text = reputation_summary(state)
+    assert "Reputation board" in rep_text
+    assert "Unlocked clients" in rep_text
+
+
+def test_mission_summary_shows_client_and_rep_reward():
+    state = new_game(906, "Mission Studio")
+    mission = ensure_mission(state)
+    text = mission_summary(mission)
+    assert "Client:" in text
+    assert "Rep:" in text
