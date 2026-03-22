@@ -40,12 +40,17 @@ from telegram_game.game_engine import (
     next_day,
     reputation_summary,
     resolve_submission,
+    rest_all_staff,
+    rest_staff,
     roster_summary,
     save_state,
+    staff_detail_summary,
     studio_summary,
     submission_risk_report,
     submission_risk_text,
+    train_staff,
     upgrade_studio,
+    goals_summary,
 )
 
 log = logging.getLogger(__name__)
@@ -124,9 +129,10 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui"), InlineKeyboardButton("👥 Team", callback_data="g|team")],
         [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🏢 Studio", callback_data="g|studio"), InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🤝 Clients", callback_data="g|clients")],
-        [InlineKeyboardButton("👤 Roster", callback_data="g|roster"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
+        [InlineKeyboardButton("👤 Roster", callback_data="g|roster"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("🏆 Goals", callback_data="g|goals")],
+        [InlineKeyboardButton("⭐ Rep", callback_data="g|reputation"), InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("📜 Log", callback_data="g|log")],
         [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
-        [InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
+        [InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
 
 
@@ -148,6 +154,10 @@ Main commands:
 /board — ringkasan board
 /assignui — assign dengan button
 /team /bench /roster — lihat staff
+/staff <nama> — kad staff detail
+/train <nama> [balanced|skill|speed] — upgrade staff
+/rest <nama> /restall — recover energy & burnout
+/goals — achievement dan milestone
 /market /hire /fire — recruitment
 /studio /clients /reputation — studio panel
 /syncdb /dbmission — DB sync tools
@@ -164,7 +174,7 @@ def _home_text(state) -> str:
         f"Studio: {state.studio_name}",
         f"Mode: {_mode_label()}",
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()} | Rep {state.reputation}",
-        f"Roster: {translator_count} translator · {vo_count} VO | Market {len(state.market)}",
+        f"Roster: {translator_count} translator · {vo_count} VO | Market {len(state.market)} | Goals {len(state.achievements)}",
         "",
         "Current mission",
         f"- {mission.code} | {mission.title}",
@@ -919,6 +929,98 @@ async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.effective_message.reply_text(text, reply_markup=_menu())
 
 
+async def cmd_staff(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    name = " ".join(context.args).strip()
+    if not name:
+        text = "Usage: /staff <nama staff>"
+    else:
+        try:
+            text = staff_detail_summary(state, name)
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_train(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    args = list(context.args or [])
+    focus = "balanced"
+    if args and args[-1].lower() in {"balanced", "skill", "speed"}:
+        focus = args.pop(-1).lower()
+    name = " ".join(args).strip()
+    if not name:
+        text = "Usage: /train <nama staff> [balanced|skill|speed]"
+    else:
+        try:
+            info = train_staff(state, name, focus=focus)
+            member = info["member"]
+            unlocked = info.get("unlocked") or []
+            text = (
+                f"🏋️ Training siap untuk {member.name}\n"
+                f"Focus: {info['focus']} | Cost: {info['cost']}\n"
+                f"Skill {member.skill} | Speed {member.speed} | Level {member.level}\n"
+                f"Energy {member.energy} | Burnout {member.burnout}"
+            )
+            if info.get("level_up"):
+                text += "\n✨ Level up!"
+            if unlocked:
+                text += "\n🏆 Unlock: " + ", ".join(unlocked)
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_rest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    name = " ".join(context.args).strip()
+    if not name:
+        text = "Usage: /rest <nama staff>"
+    else:
+        try:
+            info = rest_staff(state, name)
+            member = info["member"]
+            unlocked = info.get("unlocked") or []
+            text = (
+                f"🛌 Rest siap untuk {member.name}\n"
+                f"Cost: {info['cost']}\n"
+                f"Energy +{info['energy_recovered']} | Burnout -{info['burnout_reduced']}\n"
+                f"Energy now {member.energy} | Burnout now {member.burnout}"
+            )
+            if unlocked:
+                text += "\n🏆 Unlock: " + ", ".join(unlocked)
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_restall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    try:
+        info = rest_all_staff(state)
+        unlocked = info.get("unlocked") or []
+        text = (
+            f"🛌 Company rest day selesai\n"
+            f"Cost: {info['cost']}\n"
+            f"Total energy +{info['energy_recovered']} | Burnout -{info['burnout_reduced']}"
+        )
+        if unlocked:
+            text += "\n🏆 Unlock: " + ", ".join(unlocked)
+    except Exception as exc:
+        text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(goals_summary(state), reply_markup=_menu())
+
+
 async def cmd_clients(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _ensure_bot_mission(state)
@@ -1035,6 +1137,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "studio": cmd_studio,
         "clients": cmd_clients,
         "reputation": cmd_reputation,
+        "goals": cmd_goals,
+        "restall": cmd_restall,
         "log": cmd_log,
         "nextday": cmd_nextday,
     }
@@ -1069,14 +1173,19 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("clearcast", cmd_clearcast))
     app.add_handler(CommandHandler("submit", cmd_submit))
     app.add_handler(CommandHandler("roster", cmd_roster))
+    app.add_handler(CommandHandler("staff", cmd_staff))
     app.add_handler(CommandHandler("team", cmd_team))
     app.add_handler(CommandHandler("bench", cmd_bench))
     app.add_handler(CommandHandler("market", cmd_market))
     app.add_handler(CommandHandler("hire", cmd_hire))
     app.add_handler(CommandHandler("fire", cmd_fire))
+    app.add_handler(CommandHandler("train", cmd_train))
+    app.add_handler(CommandHandler("rest", cmd_rest))
+    app.add_handler(CommandHandler("restall", cmd_restall))
     app.add_handler(CommandHandler("studio", cmd_studio))
     app.add_handler(CommandHandler("clients", cmd_clients))
     app.add_handler(CommandHandler("reputation", cmd_reputation))
+    app.add_handler(CommandHandler("goals", cmd_goals))
     app.add_handler(CommandHandler("upgrade", cmd_upgrade))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("log", cmd_log))

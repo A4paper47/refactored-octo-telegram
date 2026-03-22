@@ -1,4 +1,4 @@
-# Studio Dub Tycoon — Render Web Service Edition (Clean v11)
+# Studio Dub Tycoon — Render Web Service Edition (v12)
 
 This is the cleaned deployment package for the Telegram + web dashboard version of Studio Dub Tycoon.
 
@@ -7,8 +7,9 @@ This is the cleaned deployment package for the Telegram + web dashboard version 
 - Flask web service for Render webhook mode
 - Telegram game bot with inline UI
 - DB-backed mission board and write-back flow
+- Training / rest / achievement gameplay loop
 - Minimal runtime files only
-- Small test suite kept for the current deployment path
+- Test suite for the current deployment path
 
 ## Render env vars
 
@@ -61,8 +62,16 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/submit`
 - `/team`
 - `/bench`
-- `/studio`
+- `/roster`
+- `/staff <name>`
 - `/market`
+- `/hire <name>`
+- `/fire <name>`
+- `/train <name> [balanced|skill|speed]`
+- `/rest <name>`
+- `/restall`
+- `/goals`
+- `/studio`
 - `/clients`
 - `/reputation`
 - `/status`

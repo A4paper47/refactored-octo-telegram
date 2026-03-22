@@ -13,6 +13,7 @@ from telegram import Update
 from telegram_game.db_integration import count_db_movie_candidates, list_db_missions
 from telegram_game.game_engine import new_game
 from telegram_game.telegram_studio_game_bot import build_game_application
+from version import APP_VERSION, BUILD_ID
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
@@ -271,6 +272,8 @@ def _service_snapshot() -> dict[str, Any]:
         "render_external_url": RENDER_EXTERNAL_URL or None,
         "webhook_url": webhook_url() or None,
         "start_error": _bot_start_error,
+        "app_version": APP_VERSION,
+        "build_id": BUILD_ID,
     }
     if BOT_ENABLED and _bot_started:
         try:
@@ -400,6 +403,8 @@ def health():
         "bot_enabled": BOT_ENABLED,
         "bot_started": _bot_started,
         "start_error": _bot_start_error,
+        "app_version": APP_VERSION,
+        "build_id": BUILD_ID,
     }
     status = 200 if (not BOT_ENABLED or _bot_started) else 503
     return jsonify(payload), status

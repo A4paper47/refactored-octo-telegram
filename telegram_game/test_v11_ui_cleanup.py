@@ -11,6 +11,8 @@ def test_help_text_mentions_menu_and_board():
     assert "/menu" in text
     assert "/board" in text
     assert "/assignui" in text
+    assert "/goals" in text
+    assert "/train" in text
 
 
 def test_home_text_contains_mission_snapshot():
@@ -20,6 +22,7 @@ def test_home_text_contains_mission_snapshot():
     assert mission.code in text
     assert mission.title in text
     assert "Studio Dub Tycoon" in text
+    assert "Goals" in text
 
 
 def test_dashboard_manifest_route(monkeypatch):

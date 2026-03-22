@@ -54,11 +54,12 @@
       <section class="hero card">
         <div class="hero-copy">
           <div class="eyebrow">Control Center</div>
-          <h2>Website + Telegram UI dah dikemaskan untuk deploy path semasa.</h2>
-          <p class="muted">Halaman ini fokus pada webhook health, mission board, dan manifest fail yang masih dipakai. Route root dah direct ke dashboard, jadi tak perlu lagi teka endpoint mana yang betul.</p>
+          <h2>Website + Telegram UI dah kemas, dan game loop v12 dah masuk.</h2>
+          <p class="muted">Halaman ini fokus pada webhook health, mission board, dan manifest fail yang masih dipakai. Sekarang gameplay pun ada training, rest, dan achievement board untuk progression jangka panjang.</p>
           <div class="pill-row wrap-row">
             <span class="pill">Webhook path {{ service.webhook_path }}</span>
             <span class="pill">External URL {{ service.render_external_url or 'missing' }}</span>
+            <span class="pill">Build {{ service.build_id }}</span>
           </div>
         </div>
         <div class="hero-actions">
@@ -235,10 +236,19 @@
           <article class="card">
             <div class="section-title">Telegram UI refresh</div>
             <ul class="plain-list muted">
-              <li>Tambah <code>/menu</code> dan <code>/help</code></li>
-              <li>Menu inline lebih kemas dan fokus ikut flow kerja</li>
-              <li>Start screen sekarang tunjuk studio snapshot + quick action</li>
-              <li>Mission list dan board text dah lebih ringkas dan jelas</li>
+              <li>Tambah <code>/menu</code>, <code>/help</code>, dan <code>/goals</code></li>
+              <li>Menu inline sekarang ada <code>Goals</code> dan <code>Rest All</code></li>
+              <li>Staff management tambah <code>/staff</code>, <code>/train</code>, <code>/rest</code></li>
+              <li>Start screen tunjuk studio snapshot + jumlah goals unlock</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <div class="section-title">Game loop v12</div>
+            <ul class="plain-list muted">
+              <li>Training loop untuk naikkan stat staff ikut fokus skill, speed, atau balanced</li>
+              <li>Rest loop untuk pulihkan energy dan turunkan burnout sebelum submit mission</li>
+              <li>Achievement / goals board bagi reward coins dan XP untuk progression jangka panjang</li>
             </ul>
           </article>
 

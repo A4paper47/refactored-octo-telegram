@@ -86,6 +86,30 @@ CLIENT_UNLOCK_REP = {
     "enterprise": 30,
 }
 
+TRAINING_FOCUS = {
+    "balanced": {"skill": 1, "speed": 1, "energy": 10, "burnout": 4},
+    "skill": {"skill": 2, "speed": 0, "energy": 12, "burnout": 5},
+    "speed": {"skill": 0, "speed": 2, "energy": 12, "burnout": 5},
+}
+
+ACHIEVEMENT_ORDER = [
+    "first_win",
+    "team_builder",
+    "trainer",
+    "burnout_clinic",
+    "rep_star",
+    "studio_tier_2",
+]
+
+ACHIEVEMENT_META = {
+    "first_win": {"title": "First Dub Cleared", "desc": "Luluskan 1 mission", "coins": 40, "xp": 20},
+    "team_builder": {"title": "Team Builder", "desc": "Miliki 15 staff atau lebih", "coins": 60, "xp": 24},
+    "trainer": {"title": "Training Arc", "desc": "Buat 3 sesi training", "coins": 45, "xp": 24},
+    "burnout_clinic": {"title": "Burnout Clinic", "desc": "Buat 4 sesi rest", "coins": 35, "xp": 18},
+    "rep_star": {"title": "Reputation Rising", "desc": "Capai reputation 20", "coins": 80, "xp": 32},
+    "studio_tier_2": {"title": "Second Floor", "desc": "Naikkan studio ke tier 2", "coins": 90, "xp": 40},
+}
+
 
 @dataclass
 class Staff:
@@ -101,6 +125,7 @@ class Staff:
     rarity: str = "common"
     traits: List[str] = field(default_factory=list)
     burnout: int = 0
+    training_sessions: int = 0
 
     def power(self) -> float:
         rarity_bonus = RARITY_MULTIPLIER.get(self.rarity, 1.0)
@@ -154,6 +179,9 @@ class GameState:
     log: List[str] = field(default_factory=list)
     reputation: int = 10
     clients_seen: List[str] = field(default_factory=list)
+    achievements: List[str] = field(default_factory=list)
+    total_trainings: int = 0
+    total_rests: int = 0
 
     def level(self) -> int:
         return 1 + self.xp // 120
@@ -368,6 +396,56 @@ def generate_market(state: GameState, seed: Optional[int] = None, count: Optiona
         )
     market.sort(key=lambda member: (RARITY_MULTIPLIER.get(member.rarity, 1.0), member.hire_cost, member.power()), reverse=True)
     return market
+
+
+def _achievement_progress(state: GameState, achievement_id: str) -> tuple[int, int]:
+    if achievement_id == "first_win":
+        return state.wins, 1
+    if achievement_id == "team_builder":
+        return len(state.roster), 15
+    if achievement_id == "trainer":
+        return state.total_trainings, 3
+    if achievement_id == "burnout_clinic":
+        return state.total_rests, 4
+    if achievement_id == "rep_star":
+        return state.reputation, 20
+    if achievement_id == "studio_tier_2":
+        return state.studio_tier, 2
+    return 0, 1
+
+
+def _achievement_ready(state: GameState, achievement_id: str) -> bool:
+    current, target = _achievement_progress(state, achievement_id)
+    return current >= target
+
+
+def _grant_achievements(state: GameState) -> List[str]:
+    unlocked: List[str] = []
+    for achievement_id in ACHIEVEMENT_ORDER:
+        if achievement_id in state.achievements:
+            continue
+        if not _achievement_ready(state, achievement_id):
+            continue
+        meta = ACHIEVEMENT_META[achievement_id]
+        state.achievements.append(achievement_id)
+        state.coins += int(meta["coins"])
+        state.xp += int(meta["xp"])
+        unlocked.append(achievement_id)
+        state.log.append(
+            f"Achievement unlock: {meta['title']} (+{meta['coins']} coins, +{meta['xp']} XP)."
+        )
+    return unlocked
+
+
+def _rest_cost(member: Staff) -> int:
+    rarity_factor = 1 + max(0.0, RARITY_MULTIPLIER.get(member.rarity, 1.0) - 1.0) * 0.6
+    return max(6, int(round((8 + member.level * 2 + member.salary // 2) * rarity_factor)))
+
+
+def _training_cost(member: Staff, focus: str) -> int:
+    rarity_factor = 1 + max(0.0, RARITY_MULTIPLIER.get(member.rarity, 1.0) - 1.0) * 0.45
+    premium = 2 if focus != "balanced" else 0
+    return max(12, int(round((18 + member.level * 5 + premium) * rarity_factor)))
 
 
 def refresh_market(state: GameState, seed: Optional[int] = None) -> List[Staff]:
@@ -626,6 +704,8 @@ def resolve_submission(state: GameState) -> Dict[str, object]:
             f"Misi {mission.code} gagal QA untuk {mission.client_name}. +{reward} coins saguhati, +{gained_xp} XP, rep {rep_change:+d}"
         )
 
+    unlocked = _grant_achievements(state)
+
     result = {
         "passed": passed,
         "qa_score": round(qa_score, 1),
@@ -638,6 +718,7 @@ def resolve_submission(state: GameState) -> Dict[str, object]:
         "rep_change": rep_change,
         "client_name": mission.client_name,
         "client_tier": mission.client_tier,
+        "achievements": unlocked,
     }
     state.current_mission = None
     return result
@@ -653,6 +734,7 @@ def hire_staff(state: GameState, staff_name: str) -> Staff:
     state.roster.append(candidate)
     state.market = [member for member in state.market if member.name.lower() != candidate.name.lower()]
     state.log.append(f"Hire {candidate.name} [{candidate.role_type}] {candidate.rarity} dengan kos {candidate.hire_cost}.")
+    _grant_achievements(state)
     return candidate
 
 
@@ -696,7 +778,8 @@ def upgrade_studio(state: GameState, target: str) -> Dict[str, object]:
         state.reputation += 1
         refresh_market(state)
         state.log.append(f"Studio expand ke tier {state.studio_tier}. Kos {cost}.")
-        return {"target": "studio", "cost": cost, "level": state.studio_tier}
+        unlocked = _grant_achievements(state)
+        return {"target": "studio", "cost": cost, "level": state.studio_tier, "unlocked": unlocked}
 
     if normalized == "translator_lab":
         state.upgrades["translator_lab"] = state.upgrades.get("translator_lab", 0) + 1
@@ -705,7 +788,8 @@ def upgrade_studio(state: GameState, target: str) -> Dict[str, object]:
                 member.skill = min(99, member.skill + 3)
                 member.speed = min(95, member.speed + 1)
         state.log.append(f"Translator Lab naik ke lvl {state.upgrades['translator_lab']}. Kos {cost}.")
-        return {"target": normalized, "cost": cost, "level": state.upgrades[normalized]}
+        unlocked = _grant_achievements(state)
+        return {"target": normalized, "cost": cost, "level": state.upgrades[normalized], "unlocked": unlocked}
 
     if normalized == "vo_booth":
         state.upgrades["vo_booth"] = state.upgrades.get("vo_booth", 0) + 1
@@ -714,7 +798,8 @@ def upgrade_studio(state: GameState, target: str) -> Dict[str, object]:
                 member.skill = min(99, member.skill + 3)
                 member.speed = min(95, member.speed + 1)
         state.log.append(f"VO Booth naik ke lvl {state.upgrades['vo_booth']}. Kos {cost}.")
-        return {"target": normalized, "cost": cost, "level": state.upgrades[normalized]}
+        unlocked = _grant_achievements(state)
+        return {"target": normalized, "cost": cost, "level": state.upgrades[normalized], "unlocked": unlocked}
 
     if normalized == "lounge":
         state.upgrades["lounge"] = state.upgrades.get("lounge", 0) + 1
@@ -722,9 +807,125 @@ def upgrade_studio(state: GameState, target: str) -> Dict[str, object]:
             member.energy = min(100, member.energy + 12)
             member.burnout = max(0, member.burnout - 6)
         state.log.append(f"Lounge naik ke lvl {state.upgrades['lounge']}. Kos {cost}.")
-        return {"target": normalized, "cost": cost, "level": state.upgrades[normalized]}
+        unlocked = _grant_achievements(state)
+        return {"target": normalized, "cost": cost, "level": state.upgrades[normalized], "unlocked": unlocked}
 
     raise ValueError("Upgrade tak dikenali.")
+
+
+def train_staff(state: GameState, staff_name: str, focus: str = "balanced") -> Dict[str, object]:
+    member = find_staff(state, staff_name)
+    if not member:
+        raise ValueError("Staff tak wujud.")
+    focus_key = (focus or "balanced").strip().lower()
+    if focus_key not in TRAINING_FOCUS:
+        raise ValueError("Focus training mesti balanced, skill, atau speed.")
+    cost = _training_cost(member, focus_key)
+    if state.coins < cost:
+        raise ValueError(f"Coins tak cukup. Perlu {cost}.")
+
+    gains = dict(TRAINING_FOCUS[focus_key])
+    if focus_key != "speed" and member.role_type == "translator" and "polyglot" in member.traits:
+        gains["skill"] += 1
+    if focus_key != "skill" and "sprinter" in member.traits:
+        gains["speed"] += 1
+    if member.role_type in {"male", "female"} and "natural" in member.traits and focus_key != "speed":
+        gains["skill"] += 1
+    if "resilient" in member.traits:
+        gains["burnout"] = max(1, gains["burnout"] - 2)
+    if "workhorse" in member.traits:
+        gains["energy"] = max(6, gains["energy"] - 2)
+
+    state.coins -= cost
+    member.skill = min(99, member.skill + gains["skill"])
+    member.speed = min(99, member.speed + gains["speed"])
+    member.energy = max(12, member.energy - gains["energy"])
+    member.burnout = min(100, member.burnout + gains["burnout"])
+    member.training_sessions += 1
+    state.total_trainings += 1
+    level_up = False
+    if member.training_sessions % 3 == 0:
+        member.level = min(99, member.level + 1)
+        level_up = True
+    unlocked = _grant_achievements(state)
+    state.log.append(
+        f"Training {focus_key} untuk {member.name}. Kos {cost}. Skill +{gains['skill']} / Speed +{gains['speed']}."
+    )
+    return {
+        "member": member,
+        "focus": focus_key,
+        "cost": cost,
+        "level_up": level_up,
+        "unlocked": unlocked,
+    }
+
+
+def rest_staff(state: GameState, staff_name: str) -> Dict[str, object]:
+    member = find_staff(state, staff_name)
+    if not member:
+        raise ValueError("Staff tak wujud.")
+    cost = _rest_cost(member)
+    if state.coins < cost:
+        raise ValueError(f"Coins tak cukup. Perlu {cost}.")
+
+    energy_gain = 26 + state.upgrades.get("lounge", 0) * 4
+    burnout_drop = 18 + state.upgrades.get("lounge", 0) * 4
+    if "workhorse" in member.traits:
+        energy_gain += 3
+    if "resilient" in member.traits:
+        burnout_drop += 4
+
+    before_energy = member.energy
+    before_burnout = member.burnout
+    state.coins -= cost
+    member.energy = min(100, member.energy + energy_gain)
+    member.burnout = max(0, member.burnout - burnout_drop)
+    state.total_rests += 1
+    unlocked = _grant_achievements(state)
+    state.log.append(f"Rest session untuk {member.name}. Kos {cost}.")
+    return {
+        "member": member,
+        "cost": cost,
+        "energy_recovered": member.energy - before_energy,
+        "burnout_reduced": before_burnout - member.burnout,
+        "unlocked": unlocked,
+    }
+
+
+def rest_all_staff(state: GameState) -> Dict[str, object]:
+    if not state.roster:
+        raise ValueError("Roster kosong.")
+    raw_cost = sum(_rest_cost(member) for member in state.roster)
+    total_cost = max(12, int(round(raw_cost * 0.72)))
+    if state.coins < total_cost:
+        raise ValueError(f"Coins tak cukup. Perlu {total_cost}.")
+    state.coins -= total_cost
+
+    total_energy = 0
+    total_burnout = 0
+    for member in state.roster:
+        energy_gain = 22 + state.upgrades.get("lounge", 0) * 4
+        burnout_drop = 16 + state.upgrades.get("lounge", 0) * 4
+        if "workhorse" in member.traits:
+            energy_gain += 2
+        if "resilient" in member.traits:
+            burnout_drop += 3
+        before_energy = member.energy
+        before_burnout = member.burnout
+        member.energy = min(100, member.energy + energy_gain)
+        member.burnout = max(0, member.burnout - burnout_drop)
+        total_energy += member.energy - before_energy
+        total_burnout += before_burnout - member.burnout
+        state.total_rests += 1
+
+    unlocked = _grant_achievements(state)
+    state.log.append(f"Company rest day dijalankan. Kos {total_cost}.")
+    return {
+        "cost": total_cost,
+        "energy_recovered": total_energy,
+        "burnout_reduced": total_burnout,
+        "unlocked": unlocked,
+    }
 
 
 def next_day(state: GameState) -> None:
@@ -746,6 +947,7 @@ def next_day(state: GameState) -> None:
         state.log.append(f"Hari {state.day} bermula. Payroll {payroll} tak cukup, morale jatuh dan rep -1.")
     else:
         state.log.append(f"Hari {state.day} bermula. Payroll dibayar: {payroll}.")
+    _grant_achievements(state)
 
 
 def _assigned_staff_names(mission: Mission) -> set[str]:
@@ -812,11 +1014,11 @@ def _staff_line(member: Staff, compact: bool = False) -> str:
     if compact:
         return (
             f"{rarity_icon} {member.name}: power {round(member.power(), 1)}, energy {member.energy}, "
-            f"burnout {member.burnout}, lvl {member.level}, traits {traits}"
+            f"burnout {member.burnout}, lvl {member.level}, train {member.training_sessions}, traits {traits}"
         )
     return (
         f"- {rarity_icon} {member.name}: skill {member.skill}, speed {member.speed}, energy {member.energy}, "
-        f"burnout {member.burnout}, lvl {member.level}, rarity {member.rarity}, salary {member.salary}, traits {traits}"
+        f"burnout {member.burnout}, lvl {member.level}, train {member.training_sessions}, rarity {member.rarity}, salary {member.salary}, traits {traits}"
     )
 
 
@@ -908,7 +1110,7 @@ def studio_summary(state: GameState) -> str:
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()}\n"
         f"Wins {state.wins} | Losses {state.losses} | Reputation {state.reputation}\n"
         f"Studio tier {state.studio_tier} | Payroll per day {total_salary(state)}\n"
-        f"Roster {len(state.roster)} | Market {len(state.market)}\n"
+        f"Roster {len(state.roster)} | Market {len(state.market)} | Achievements {len(state.achievements)}/{len(ACHIEVEMENT_ORDER)}\n"
         f"Unlocked client tiers: {unlocked_tiers or 'indie'}\n\n"
         f"Upgrades:\n"
         f"- translator_lab lvl {state.upgrades.get('translator_lab', 0)} (next {translator_cost})\n"
@@ -996,8 +1198,61 @@ def reputation_summary(state: GameState) -> str:
         f"Reputation: {state.reputation}\n"
         f"Wins/Losses: {state.wins}/{state.losses}\n"
         f"Unlocked clients: {', '.join(unlocked) if unlocked else 'Indie Spark'}\n"
+        f"Achievements: {len(state.achievements)}/{len(ACHIEVEMENT_ORDER)}\n"
         f"Next tier target: {next_tier or 'max tier unlocked'}"
     )
+
+def staff_detail_summary(state: GameState, staff_name: str) -> str:
+    member = find_staff(state, staff_name)
+    if not member:
+        raise ValueError("Staff tak wujud.")
+    assigned = False
+    mission = state.current_mission
+    if mission is not None:
+        assigned = member.name == mission.assigned_translator or member.name in mission.assigned_roles.values()
+    return (
+        f"🧾 Staff card\n"
+        f"Name: {member.name}\n"
+        f"Role: {member.role_type}\n"
+        f"Rarity: {member.rarity} {RARITY_ICON.get(member.rarity, '⚪')}\n"
+        f"Skill {member.skill} | Speed {member.speed} | Level {member.level}\n"
+        f"Energy {member.energy} | Burnout {member.burnout} | Train sessions {member.training_sessions}\n"
+        f"Salary/day {member.salary} | Assigned now: {'yes' if assigned else 'no'}\n"
+        f"Traits: {_format_traits(member)}\n"
+        f"Train cost: {_training_cost(member, 'balanced')} | Rest cost: {_rest_cost(member)}"
+    )
+
+
+def goals_summary(state: GameState) -> str:
+    unlocked_ids = list(state.achievements)
+    lines = [
+        f"🏆 Goals board — {state.studio_name}",
+        f"Unlocked {len(unlocked_ids)}/{len(ACHIEVEMENT_ORDER)} achievements",
+        f"Wins {state.wins} | Reputation {state.reputation} | Trainings {state.total_trainings} | Rests {state.total_rests}",
+        "",
+        "Unlocked:",
+    ]
+    if unlocked_ids:
+        for achievement_id in unlocked_ids:
+            meta = ACHIEVEMENT_META[achievement_id]
+            lines.append(f"- ✅ {meta['title']} — {meta['desc']}")
+    else:
+        lines.append("- belum ada")
+
+    lines.append("")
+    lines.append("Next milestones:")
+    pending = [achievement_id for achievement_id in ACHIEVEMENT_ORDER if achievement_id not in unlocked_ids]
+    if not pending:
+        lines.append("- Semua achievement utama dah unlock.")
+    else:
+        for achievement_id in pending[:3]:
+            meta = ACHIEVEMENT_META[achievement_id]
+            current, target = _achievement_progress(state, achievement_id)
+            lines.append(
+                f"- {meta['title']} — {meta['desc']} ({current}/{target}) → +{meta['coins']} coins, +{meta['xp']} XP"
+            )
+    return "\n".join(lines)
+
 
 def save_state(state: GameState, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1039,6 +1294,9 @@ def load_state(path: Path) -> Optional[GameState]:
         log=data.get("log", []),
         reputation=data.get("reputation", 10),
         clients_seen=data.get("clients_seen", []),
+        achievements=data.get("achievements", []),
+        total_trainings=data.get("total_trainings", 0),
+        total_rests=data.get("total_rests", 0),
     )
     if state.current_mission is not None:
         _remember_client(state, state.current_mission.client_name)

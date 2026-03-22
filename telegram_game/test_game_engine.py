@@ -19,9 +19,14 @@ from telegram_game.game_engine import (
     next_day,
     reputation_summary,
     resolve_submission,
+    rest_all_staff,
+    rest_staff,
     save_state,
+    staff_detail_summary,
     studio_summary,
+    train_staff,
     upgrade_studio,
+    goals_summary,
 )
 
 
@@ -177,3 +182,57 @@ def test_mission_summary_shows_client_and_rep_reward():
     text = mission_summary(mission)
     assert "Client:" in text
     assert "Rep:" in text
+
+
+def test_train_and_rest_staff_update_progression_layers():
+    state = new_game(907, "Training Studio")
+    state.coins = 999
+    member = next(item for item in state.roster if item.role_type == "translator")
+    energy_before = member.energy
+    skill_before = member.skill
+    train_info = train_staff(state, member.name, focus="skill")
+    assert train_info["cost"] > 0
+    assert member.skill >= skill_before + 2
+    assert member.energy < energy_before
+
+    member.energy = 40
+    member.burnout = 28
+    rest_info = rest_staff(state, member.name)
+    assert rest_info["energy_recovered"] > 0
+    assert rest_info["burnout_reduced"] > 0
+    assert state.total_trainings >= 1
+    assert state.total_rests >= 1
+
+
+def test_restall_and_goals_summary_show_v12_loop():
+    state = new_game(908, "Goals Studio")
+    state.coins = 999
+    for member in state.roster:
+        member.energy = 35
+        member.burnout = 22
+    info = rest_all_staff(state)
+    assert info["cost"] > 0
+    text = goals_summary(state)
+    assert "Goals board" in text
+    assert "Next milestones" in text
+    assert state.total_rests >= len(state.roster)
+
+
+def test_staff_detail_summary_and_save_load_keep_v12_fields():
+    state = new_game(909, "Card Studio")
+    state.coins = 999
+    member = next(item for item in state.roster if item.role_type == "male")
+    train_staff(state, member.name, focus="speed")
+    card = staff_detail_summary(state, member.name)
+    assert "Staff card" in card
+    assert member.name in card
+    assert "Train cost" in card
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "save_v12.json"
+        save_state(state, path)
+        loaded = load_state(path)
+    assert loaded is not None
+    reloaded = next(item for item in loaded.roster if item.name == member.name)
+    assert reloaded.training_sessions >= 1
+    assert loaded.total_trainings >= 1
