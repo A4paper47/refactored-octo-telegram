@@ -1,21 +1,19 @@
-# Studio Dub Tycoon — Render Web Service Edition (v14)
+# Studio Dub Tycoon — Render Web Service Edition (v15)
 
 This is the cleaned deployment package for the Telegram + web dashboard version of Studio Dub Tycoon.
 
-## What changed in v14
+## What changed in v15
 
-- refreshed the website dashboard UI again with a live **Action center**
-- added website-side action APIs for:
-  - `POST /api/actions/setup-webhook`
-  - `POST /api/actions/webhook-info`
-  - `POST /api/actions/delete-webhook`
-- improved mission detail panel with **command deck** buttons for Telegram flow
-- added Telegram **inline gear UI**:
-  - `/gearui`
-  - buy gear from buttons
-  - open staff card from buttons
-  - inline train / rest / equip / unequip flow
-  - inline equip picker for compatible gear
+- refreshed the website dashboard into a more professional operations layout
+- improved hierarchy, spacing, labels, and empty states across the dashboard
+- reorganised the sidebar into operations, API, webhook, and Telegram workflow sections
+- polished the mission board, action center, live status console, and mission detail panel
+- refined Telegram text for:
+  - `/menu`
+  - `/help`
+  - `/missions`
+  - home panel wording
+- updated build id to `20260323-v15-professional-dashboard-ui`
 
 ## What is inside
 

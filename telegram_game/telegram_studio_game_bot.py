@@ -148,32 +148,32 @@ def _menu() -> InlineKeyboardMarkup:
 def _help_text() -> str:
     return """❓ Studio Dub Tycoon — command guide
 
-Core flow:
-1. /mission atau /missions
+Recommended mission flow:
+1. /mission or /missions
 2. /accept
-3. /assignui atau /autocast
+3. /assignui or /autocast
 4. /team
 5. /submit
 
-Main commands:
-/menu — panel utama
-/mission — mission semasa
+Core controls:
+/menu — main control panel
+/mission — active mission summary
 /missions [status=...] [translator=...] [priority=...] [lang=...] [page=...]
-/pick <code> — pilih mission DB
-/board — ringkasan board
-/assignui — assign dengan button
-/team /bench /roster — lihat staff
-/staff <nama> — kad staff detail
-/train <nama> [balanced|skill|speed] — upgrade staff
-/rest <nama> /restall — recover energy & burnout
-/goals — achievement dan milestone
-/market /hire /fire — recruitment
-/inventory /gearshop /gearui — inventory, shop, dan inline gear panel
-/buygear <item_key> — beli gear
-/equip <staff> <item_key> /unequip <staff> — pasang gear staff
-/studio /clients /reputation — studio panel
-/syncdb /dbmission — DB sync tools
-/log /nextday — progression"""
+/pick <code> — load a DB mission
+/board — board snapshot
+/assignui — assign with buttons
+/team /bench /roster — staff overview
+/staff <name> — staff profile
+/train <name> [balanced|skill|speed] — improve a staff member
+/rest <name> /restall — recover energy and reduce burnout
+/goals — achievements and milestones
+/market /hire /fire — recruitment tools
+/inventory /gearshop /gearui — inventory, shop, and gear actions
+/buygear <item_key> — buy gear
+/equip <staff> <item_key> /unequip <staff> — manage equipment
+/studio /clients /reputation — studio overview
+/syncdb /dbmission — database sync tools
+/log /nextday — progression and daily cycle"""
 
 
 def _home_text(state) -> str:
@@ -185,17 +185,17 @@ def _home_text(state) -> str:
         "🎮 Studio Dub Tycoon",
         f"Studio: {state.studio_name}",
         f"Mode: {_mode_label()}",
-        f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()} | Rep {state.reputation}",
-        f"Roster: {translator_count} translator · {vo_count} VO | Market {len(state.market)} | Goals {len(state.achievements)} | Inv {sum(state.inventory.values())}",
+        f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()} | Reputation {state.reputation}",
+        f"Roster: {translator_count} translators · {vo_count} VO | Market {len(state.market)} | Goals {len(state.achievements)} | Inventory {sum(state.inventory.values())}",
         "",
-        "Current mission",
+        "Active mission",
         f"- {mission.code} | {mission.title}",
         f"- Client {mission.client_name} [{mission.client_tier}] | {mission.lang.upper()} | {mission.priority}",
         f"- Modifiers: {', '.join(mission.modifiers) if mission.modifiers else '-'}",
         f"- Translator: {mission.assigned_translator or '-'}",
         f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
         "",
-        "Tap button bawah untuk cepat gerak. Guna /help kalau nak full guide.",
+        "Use the buttons below for the fastest flow. Run /help for the full guide.",
     ]
     return chr(10).join(lines)
 
@@ -517,7 +517,7 @@ def _board_text(state) -> str:
     if not GAME_USE_DB:
         mission = _ensure_bot_mission(state)
         return "🗂️ Mission board (demo mode)" + chr(10) + chr(10) + mission_summary(mission)
-    chunks = ["🗂️ Mission board snapshot", "Guna /missions untuk list penuh atau tap filter button bawah."]
+    chunks = ["🗂️ Mission board snapshot", "Use /missions for the full list or the filter buttons below."]
     try:
         snapshot = get_db_board_snapshot(state, sample_limit=3)
     except Exception as exc:
@@ -709,11 +709,11 @@ def _missions_text(
         filters.append(f"lang={lang}")
     header = ["📚 DB mission list"]
     if filters:
-        header.append(f"Filter: {', '.join(filters)}")
+        header.append(f"Filters: {', '.join(filters)}")
     suffix = f" — total {total}" if total is not None else ""
     header.append(f"Page {page}/{max(1, total_pages)}{suffix}")
     if not items:
-        return chr(10).join(header + ["", "- Tiada mission jumpa."])
+        return chr(10).join(header + ["", "- No missions found for the current filter."])
     lines = header + [""]
     for item in items:
         lines.append(
@@ -767,7 +767,7 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         mission = load_db_mission_into_state(state)
         if mission is None:
-            text = "❌ Tiada mission sesuai dalam DB. Fallback guna /mission biasa."
+            text = "❌ No suitable DB mission was found. Falling back to the standard /mission flow."
         else:
             text = f"🗄️ DB mission loaded\n\n{mission_summary(mission)}"
     except Exception as exc:

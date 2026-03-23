@@ -1,36 +1,28 @@
-# Telegram UI Notes — v14 Action + Gear UI
+# Telegram UI Notes — v15 Professional Interface Refresh
 
 ## Main improvements
 
-- added `/gearui`
-- `/inventory` and `/gearshop` now return gear-focused inline panels
-- added inline callbacks for:
-  - buy gear
-  - open staff card
-  - train balanced / skill / speed
-  - rest staff
-  - equip picker
-  - equip / unequip
-- `/staff <name>` now opens a richer action panel
-- main menu now has **Gear UI** button
+- improved home panel copy for better readability
+- rewrote `/help` into a clearer command guide
+- polished `/missions` empty-state and filter wording
+- kept the inline gear flow from v14
+- kept the inline assign flow and command deck gameplay loop
 
 ## Recommended flow
 
 ```text
 /start
 /menu
+/missions
+/pick BN-260320-01
+/accept
+/assignui
+/team
+/submit
 /gearui
 /staff Alya
 /train Alya skill
 /rest Alya
-/gearshop
-/buygear focus_notes
-/equip Alya focus_notes
-/mission
-/accept
-/autocast
-/team
-/submit
 ```
 
 ## Button layout

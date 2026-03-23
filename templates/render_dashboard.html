@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Studio Dub Tycoon Control Center</title>
+  <title>Studio Dub Tycoon — Operations Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -17,17 +17,45 @@
         <div>
           <div class="eyebrow">Render Web Service</div>
           <h1>Studio Dub Tycoon</h1>
+          <p class="sidebar-copy">Operations dashboard for webhook health, mission visibility, and Telegram control.</p>
         </div>
       </div>
 
-      <div class="stack gap-lg">
+      <div class="stack gap-lg sidebar-sections">
         <section>
-          <div class="section-title">Quick links</div>
+          <div class="section-title">Environment</div>
+          <div class="pill-row wrap-row">
+            <span class="pill">Mode {{ service.mode }}</span>
+            <span class="pill">Build {{ service.build_id }}</span>
+            <span class="pill {{ 'status-ok' if service.web_db_ready else 'status-error' }}">DB {{ 'READY' if service.web_db_ready else 'CHECK' }}</span>
+            <span class="pill status-{{ service.status }}">{{ service.status|upper }}</span>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title">Operations</div>
+          <nav class="nav-list">
+            <a href="#overview">Overview</a>
+            <a href="#action-center">Action center</a>
+            <a href="#mission-board">Mission board</a>
+            <a href="#mission-detail-card">Mission detail</a>
+            <a href="#runtime-manifest">Runtime manifest</a>
+          </nav>
+        </section>
+
+        <section>
+          <div class="section-title">API & health</div>
           <nav class="nav-list">
             <a href="{{ health_path }}">Health</a>
             <a href="{{ api_status_path }}">API Status</a>
             <a href="{{ api_missions_path }}">API Missions</a>
             <a href="{{ api_manifest_path }}">API Manifest</a>
+          </nav>
+        </section>
+
+        <section>
+          <div class="section-title">Webhook routes</div>
+          <nav class="nav-list">
             <a href="{{ setup_path }}">Setup Webhook</a>
             <a href="{{ webhook_info_path }}">Webhook Info</a>
             <a href="{{ delete_webhook_path }}">Delete Webhook</a>
@@ -35,46 +63,37 @@
         </section>
 
         <section>
-          <div class="section-title">Current mode</div>
-          <div class="pill-row wrap-row">
-            <span class="pill">{{ service.mode }}</span>
-            <span class="pill">DB {{ 'READY' if service.web_db_ready else 'CHECK' }}</span>
-            <span class="pill status-{{ service.status }}">{{ service.status|upper }}</span>
-          </div>
-        </section>
-
-        <section>
-          <div class="section-title">Telegram refresh</div>
+          <div class="section-title">Telegram workflow</div>
           <ul class="plain-list muted compact-list">
-            <li>/menu dan /help untuk panel utama</li>
-            <li>/gearui, /inventory, /gearshop untuk gear flow v14</li>
-            <li>/assignui, /board, /missions untuk mission control</li>
+            <li><code>/menu</code> for the main control panel</li>
+            <li><code>/missions</code> or <code>/board</code> to review available work</li>
+            <li><code>/assignui</code>, <code>/team</code>, and <code>/submit</code> for active mission flow</li>
+            <li><code>/gearui</code>, <code>/inventory</code>, and <code>/gearshop</code> for staff progression</li>
           </ul>
         </section>
 
-        <section>
+        <section class="runtime-note">
           <div class="section-title">Runtime cleanup</div>
-          <div class="tiny muted">Kept {{ manifest.kept_total }} files · removed {{ manifest.removed_total }} legacy items.</div>
+          <div class="tiny muted">Kept {{ manifest.kept_total }} runtime files and removed {{ manifest.removed_total }} legacy items.</div>
         </section>
       </div>
     </aside>
 
     <main class="content">
-      <section class="hero card">
+      <section class="hero card" id="overview">
         <div class="hero-copy">
-          <div class="eyebrow">Control Center v14</div>
-          <h2>Dashboard lebih hidup untuk Render, dan Telegram sekarang ada gear/staff actions yang lebih laju.</h2>
-          <p class="muted">Versi ini tambah action center terus dalam website untuk webhook control, mission command deck yang lebih jelas, dan inline gear UI pada Telegram untuk buy, train, rest, equip, dan unequip tanpa perlu taip command panjang.</p>
-          <div class="pill-row wrap-row">
+          <div class="eyebrow">Operations Dashboard v15</div>
+          <h2>Professional control surface for Telegram webhook, mission board, and live service health.</h2>
+          <p class="muted">This version refines the dashboard hierarchy, improves empty states, cleans up wording, and makes mission operations easier to scan and act on during live testing or production support.</p>
+          <div class="pill-row wrap-row hero-meta">
+            <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
             <span class="pill">External {{ service.render_external_url or 'missing' }}</span>
-            <span class="pill">Build {{ service.build_id }}</span>
-            <span class="pill {{ 'status-ok' if service.web_db_ready else 'status-error' }}">DB {{ 'READY' if service.web_db_ready else 'NOT READY' }}</span>
           </div>
         </div>
         <div class="hero-actions">
           <button class="btn btn-primary js-action-btn" data-endpoint="{{ api_action_setup_path }}" data-label="setup webhook" type="button">Setup webhook</button>
-          <button class="btn js-action-btn" data-endpoint="{{ api_action_info_path }}" data-label="webhook info" type="button">Webhook info</button>
+          <button class="btn js-action-btn" data-endpoint="{{ api_action_info_path }}" data-label="webhook info" type="button">Inspect webhook</button>
           <button class="btn" type="button" id="refresh-status-btn">Refresh status</button>
         </div>
       </section>
@@ -88,74 +107,68 @@
         <article class="card stat-card">
           <div class="stat-label">Pending updates</div>
           <div class="stat-value" id="pending-updates">{{ service.webhook_info.pending_update_count if service.webhook_info else 0 }}</div>
-          <div class="muted">Queue Telegram untuk webhook semasa.</div>
+          <div class="muted">Queued Telegram updates waiting on the webhook.</div>
         </article>
         <article class="card stat-card">
           <div class="stat-label">Webhook target</div>
           <div class="stat-value small" id="webhook-url">{{ service.webhook_info.url if service.webhook_info and service.webhook_info.url else (service.webhook_url or 'not set') }}</div>
-          <div class="muted">Pastikan URL ini sama dengan public URL Render.</div>
+          <div class="muted">Keep this aligned with the public Render URL.</div>
         </article>
         <article class="card stat-card">
-          <div class="stat-label">DB board status</div>
+          <div class="stat-label">Database board</div>
           <div class="stat-value small {{ 'status-ok' if service.web_db_ready else 'status-error' }}" id="db-status">{{ 'READY' if service.web_db_ready else (service.web_db_error or 'NOT READY') }}</div>
-          <div class="muted">Kalau mission board gagal, check DATABASE_URL dan init_app.</div>
-        </article>
-      </section>
-
-      <section class="action-grid">
-        <article class="card action-card">
-          <div class="row space-between wrap-row gap-md">
-            <div>
-              <div class="section-title">Action center</div>
-              <p class="muted">Trigger webhook setup, webhook info, atau delete webhook terus dari dashboard tanpa buka route asing.</p>
-            </div>
-            <div class="row gap-sm wrap-row">
-              <button class="btn btn-primary js-action-btn" data-endpoint="{{ api_action_setup_path }}" data-label="setup webhook" type="button">Setup</button>
-              <button class="btn js-action-btn" data-endpoint="{{ api_action_info_path }}" data-label="webhook info" type="button">Info</button>
-              <button class="btn btn-danger js-action-btn" data-endpoint="{{ api_action_delete_path }}" data-label="delete webhook" type="button">Delete</button>
-            </div>
-          </div>
-          <pre id="action-result">Ready.</pre>
-        </article>
-
-        <article class="card compact-card">
-          <div class="section-title">Gameplay v14</div>
-          <div class="chip-row">
-            <span class="chip">Gear UI</span>
-            <span class="chip">Buy via button</span>
-            <span class="chip">Staff card actions</span>
-            <span class="chip">Equip picker</span>
-          </div>
+          <div class="muted">Mission board access through SQLAlchemy and the current app context.</div>
         </article>
       </section>
 
       <section class="substats-grid">
-        <article class="card compact-card">
+        <article class="card compact-card metric-card">
           <div class="section-title">Mission totals</div>
           <div class="chip-row" id="mission-total-chips">
             {% for key, value in (board.counts or {}).items() %}
             <span class="chip">{{ key }} <strong>{{ value }}</strong></span>
+            {% else %}
+            <span class="chip">No mission stats</span>
             {% endfor %}
           </div>
         </article>
-        <article class="card compact-card">
-          <div class="section-title">Website tools</div>
+        <article class="card compact-card metric-card">
+          <div class="section-title">Dashboard tools</div>
           <div class="chip-row">
-            <span class="chip">Live status</span>
-            <span class="chip">Command deck</span>
-            <span class="chip">Mission detail preview</span>
-            <span class="chip">Webhook actions</span>
+            <span class="chip">Live status refresh</span>
+            <span class="chip">Webhook controls</span>
+            <span class="chip">Mission detail panel</span>
+            <span class="chip">Telegram command deck</span>
           </div>
         </article>
       </section>
 
       <section class="layout-grid">
         <div class="stack gap-lg">
-          <article class="card">
+          <article class="card action-card" id="action-center">
+            <div class="row space-between align-start gap-md wrap-row">
+              <div>
+                <div class="section-title">Action center</div>
+                <p class="muted">Run webhook setup, inspect current webhook metadata, or remove the webhook without leaving the dashboard.</p>
+              </div>
+              <div class="row gap-sm wrap-row">
+                <button class="btn btn-primary js-action-btn" data-endpoint="{{ api_action_setup_path }}" data-label="setup webhook" type="button">Setup</button>
+                <button class="btn js-action-btn" data-endpoint="{{ api_action_info_path }}" data-label="webhook info" type="button">Info</button>
+                <button class="btn btn-danger js-action-btn" data-endpoint="{{ api_action_delete_path }}" data-label="delete webhook" type="button">Delete</button>
+              </div>
+            </div>
+            <div class="action-meta row space-between wrap-row gap-md">
+              <div class="tiny muted">Live action output appears below. Use this during setup, health checks, and webhook recovery.</div>
+              <div class="tiny muted" id="last-refresh-text">Last refresh: waiting…</div>
+            </div>
+            <pre id="action-result">Ready.</pre>
+          </article>
+
+          <article class="card" id="mission-board">
             <div class="row space-between align-start gap-md wrap-row">
               <div>
                 <div class="section-title">Mission board</div>
-                <p class="muted">Filter mission DB, klik row untuk preview detail, dan copy terus command <code>/pick CODE</code> untuk Telegram.</p>
+                <p class="muted">Filter database-backed missions, inspect details, and copy Telegram commands for the selected item.</p>
               </div>
               <div class="row gap-sm wrap-row">
                 <a class="btn" href="{{ api_missions_path }}">Open JSON</a>
@@ -182,12 +195,12 @@
                 <select name="priority">
                   <option value="" {% if not filters.priority %}selected{% endif %}>All</option>
                   {% for pr in ['superurgent','urgent','nonurgent','flexible'] %}
-                  <option value="{{ pr }}" {% if filters.priority == pr %}selected{% endif %}>{{ pr }}</option>
+                  <option value="{{ pr }}" {% if filters.priority == pr %}selected{% endif %}>{{ pr|title }}</option>
                   {% endfor %}
                 </select>
               </label>
               <label>
-                <span>Lang</span>
+                <span>Language</span>
                 <input type="text" name="lang" value="{{ filters.lang or '' }}" placeholder="bn / ms / en">
               </label>
               <label>
@@ -196,7 +209,7 @@
               </label>
               <input type="hidden" name="selected" value="{{ selected_code or '' }}">
               <div class="filter-actions">
-                <button class="btn btn-primary" type="submit">Apply</button>
+                <button class="btn btn-primary" type="submit">Apply filters</button>
                 <a class="btn" href="{{ url_for('dashboard') }}">Reset</a>
               </div>
             </form>
@@ -207,13 +220,14 @@
             </div>
             {% endif %}
 
+            {% if board['items'] %}
             <div class="table-wrap">
               <table id="mission-table">
                 <thead>
                   <tr>
                     <th>Code</th>
                     <th>Title</th>
-                    <th>Lang</th>
+                    <th>Language</th>
                     <th>Priority</th>
                     <th>Status</th>
                     <th>Translator</th>
@@ -236,20 +250,25 @@
                     <td>{{ item.role_count }}</td>
                     <td>{{ item.total_lines }}</td>
                   </tr>
-                  {% else %}
-                  <tr>
-                    <td colspan="8" class="muted">No missions found for the current filter.</td>
-                  </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
+            {% else %}
+            <div class="empty-state">
+              <div class="empty-state-mark">∅</div>
+              <div>
+                <h3>No missions found for the current filter.</h3>
+                <p class="muted">The service is healthy, but the current query returned no rows. Try clearing filters, checking the selected translator or status, or confirming that mission data exists in the connected database.</p>
+              </div>
+            </div>
+            {% endif %}
 
             <div class="row space-between wrap-row gap-md top-gap">
               <div class="muted">Page {{ board.page }} / {{ board.total_pages }} · Total {{ board.total }}</div>
               <div class="row gap-sm wrap-row">
                 {% if board.page > 1 %}
-                <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page-1, selected=selected_code) }}">Prev</a>
+                <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page-1, selected=selected_code) }}">Previous</a>
                 {% endif %}
                 {% if board.page < board.total_pages %}
                 <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page+1, selected=selected_code) }}">Next</a>
@@ -258,8 +277,14 @@
             </div>
           </article>
 
-          <article class="card">
-            <div class="section-title">Live status preview</div>
+          <article class="card status-console-card">
+            <div class="row space-between wrap-row gap-md">
+              <div>
+                <div class="section-title">Live status preview</div>
+                <p class="muted">Fresh service data from <code>/api/status</code> for quick troubleshooting.</p>
+              </div>
+              <span class="tiny muted" id="status-updated-text">Awaiting first refresh…</span>
+            </div>
             <pre id="status-json">Loading status…</pre>
           </article>
         </div>
@@ -280,7 +305,7 @@
               <div class="detail-item"><span>Tier</span><strong id="detail-tier">{{ mission_detail.client_tier if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Status</span><strong id="detail-status">{{ mission_detail.status if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Priority</span><strong id="detail-priority">{{ mission_detail.priority if mission_detail else '-' }}</strong></div>
-              <div class="detail-item"><span>Lang</span><strong id="detail-lang">{{ mission_detail.lang if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Language</span><strong id="detail-lang">{{ mission_detail.lang if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Translator</span><strong id="detail-translator">{{ mission_detail.translator if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Reward</span><strong id="detail-reward">{{ mission_detail.reward if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>XP</span><strong id="detail-xp">{{ mission_detail.xp if mission_detail else '-' }}</strong></div>
@@ -294,7 +319,7 @@
                 <button class="btn copy-command-btn" type="button" id="cmd-team" data-command="/team">Copy /team</button>
                 <button class="btn copy-command-btn" type="button" id="cmd-submit" data-command="/submit">Copy /submit</button>
               </div>
-              <div class="tiny muted" id="copy-feedback">Click mana-mana button untuk copy command ke clipboard.</div>
+              <div class="tiny muted" id="copy-feedback">Use the command deck to copy Telegram actions for the selected mission.</div>
             </div>
 
             <div class="detail-section">
@@ -330,6 +355,7 @@
 
           <article class="card">
             <div class="section-title">Mission snapshot</div>
+            <p class="muted">A compact status snapshot for quick triage when the full board is filtered or empty.</p>
             <div class="stack gap-md">
               {% for status_name, items in (board.snapshot or {}).items() %}
               <div class="snapshot-block">
@@ -350,9 +376,9 @@
             </div>
           </article>
 
-          <article class="card">
-            <div class="section-title">Manifest</div>
-            <p class="muted">Deploy semasa tinggal fail runtime penting untuk webhook, dashboard, DB integration, dan game loop.</p>
+          <article class="card" id="runtime-manifest">
+            <div class="section-title">Runtime manifest</div>
+            <p class="muted">This deployment keeps only the files required for the webhook service, dashboard, database integration, and current game loop.</p>
             <div class="stack gap-md mini-manifest">
               {% for group, files in manifest.kept.items() %}
               <div class="manifest-block">

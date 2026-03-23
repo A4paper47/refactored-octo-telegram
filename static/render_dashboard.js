@@ -1,9 +1,18 @@
+function nowStamp() {
+  return new Date().toLocaleString();
+}
+
+function setRefreshText(id, prefix) {
+  const node = document.getElementById(id);
+  if (node) node.textContent = `${prefix} ${nowStamp()}`;
+}
+
 async function refreshStatus() {
   const endpoint = window.DASHBOARD_API_STATUS;
   if (!endpoint) return;
 
   try {
-    const resp = await fetch(endpoint, { headers: { "Accept": "application/json" } });
+    const resp = await fetch(endpoint, { headers: { Accept: "application/json" } });
     const data = await resp.json();
 
     const statusText = document.getElementById("status-text");
@@ -29,11 +38,14 @@ async function refreshStatus() {
     if (pre) {
       pre.textContent = JSON.stringify(data, null, 2);
     }
+    setRefreshText("status-updated-text", "Status updated:");
+    setRefreshText("last-refresh-text", "Last refresh:");
   } catch (err) {
     const pre = document.getElementById("status-json");
     if (pre) {
       pre.textContent = `Failed to load status\n${String(err)}`;
     }
+    setRefreshText("status-updated-text", "Refresh failed at");
   }
 }
 
@@ -70,14 +82,16 @@ function renderMissionDetail(detail) {
   if (translator) translator.textContent = detail.translator || "-";
   if (reward) reward.textContent = detail.reward ?? "-";
   if (xp) xp.textContent = detail.xp ?? "-";
+
+  const command = `/pick ${detail.code || "-"}`;
   if (pickLink) {
-    const command = `/pick ${detail.code || "-"}`;
     pickLink.textContent = command;
     pickLink.dataset.command = command;
   }
   if (cmdPick) {
-    cmdPick.dataset.command = `/pick ${detail.code || "-"}`;
+    cmdPick.dataset.command = command;
   }
+
   if (modifiers) {
     modifiers.innerHTML = "";
     const items = detail.modifiers || [];
@@ -95,6 +109,7 @@ function renderMissionDetail(detail) {
       });
     }
   }
+
   if (roles) {
     roles.innerHTML = "";
     (detail.roles || []).forEach((item) => {
@@ -110,13 +125,14 @@ function renderMissionDetail(detail) {
       roles.appendChild(empty);
     }
   }
+
   setMissionRowActive(detail.code);
 }
 
 async function loadMissionDetail(url) {
   if (!url) return;
   try {
-    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    const resp = await fetch(url, { headers: { Accept: "application/json" } });
     const data = await resp.json();
     if (data.ok && data.detail) {
       renderMissionDetail(data.detail);
@@ -140,34 +156,41 @@ function bindMissionRows() {
   });
 }
 
-async function runAction(endpoint, label) {
+async function runAction(endpoint, label, button) {
   const target = document.getElementById("action-result");
   if (!endpoint) return;
+  const original = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Working…";
+  }
   if (target) target.textContent = `Running ${label || endpoint}...`;
+
   try {
     const resp = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json"
+        Accept: "application/json"
       },
       body: JSON.stringify({})
     });
     const data = await resp.json();
-    if (target) {
-      target.textContent = JSON.stringify(data, null, 2);
-    }
-    refreshStatus();
+    if (target) target.textContent = JSON.stringify(data, null, 2);
+    await refreshStatus();
   } catch (err) {
-    if (target) {
-      target.textContent = `Action failed\n${String(err)}`;
+    if (target) target.textContent = `Action failed\n${String(err)}`;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
     }
   }
 }
 
 function bindActionButtons() {
   document.querySelectorAll(".js-action-btn").forEach((btn) => {
-    btn.addEventListener("click", () => runAction(btn.dataset.endpoint, btn.dataset.label));
+    btn.addEventListener("click", () => runAction(btn.dataset.endpoint, btn.dataset.label, btn));
   });
 }
 
@@ -175,7 +198,7 @@ async function copyCommand(text) {
   const feedback = document.getElementById("copy-feedback");
   try {
     await navigator.clipboard.writeText(text);
-    if (feedback) feedback.textContent = `Copied: ${text}`;
+    if (feedback) feedback.textContent = `Copied to clipboard: ${text}`;
   } catch (err) {
     if (feedback) feedback.textContent = `Copy failed: ${String(err)}`;
   }
