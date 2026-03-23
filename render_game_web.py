@@ -338,7 +338,24 @@ def _dashboard_detail(board: Optional[dict[str, Any]] = None) -> Optional[dict[s
 
 
 def _mission_workflow_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any]:
-    code = (detail or {}).get("code") or "<movie_code>"
+    detail = detail or {}
+    code = detail.get("code") or "<movie_code>"
+    translator_name = str(detail.get("translator") or "-").strip()
+    translator_template = f"/assigntr {translator_name}" if translator_name and translator_name != "-" else "/assigntr <translator_name>"
+    role_templates: list[dict[str, str]] = []
+    for role in detail.get("roles") or []:
+        role_name = str(role.get("role") or "ROLE")
+        assigned = str(role.get("assigned") or "-").strip()
+        gender = str(role.get("gender") or "staff").strip().lower() or "staff"
+        blank_target = f"<{gender}_staff_name>"
+        role_templates.append({
+            "role": role_name,
+            "gender": gender,
+            "assigned": assigned,
+            "template": f"/assign {role_name} {blank_target}",
+            "assigned_template": f"/assign {role_name} {assigned}" if assigned and assigned != "-" else "",
+        })
+
     commands = {
         "pick": f"/pick {code}",
         "accept": "/accept",
@@ -347,6 +364,7 @@ def _mission_workflow_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any
         "submit": "/submit",
         "gearui": "/gearui",
         "missionsui": "/missionsui",
+        "translator_template": translator_template,
     }
     steps = [
         {"label": "Load mission", "command": commands["pick"]},
@@ -355,12 +373,16 @@ def _mission_workflow_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any
         {"label": "Review team", "command": commands["team"]},
         {"label": "Submit QA", "command": commands["submit"]},
     ]
-    workflow_text = "\n".join(step["command"] for step in steps)
+    quick_lines = [translator_template] + [item["template"] for item in role_templates[:4]]
+    workflow_text = "\n".join([*(step["command"] for step in steps), translator_template])
     return {
         "code": code,
         "commands": commands,
         "steps": steps,
         "workflow_text": workflow_text,
+        "translator_template": translator_template,
+        "role_templates": role_templates,
+        "quick_templates_text": "\n".join(line for line in quick_lines if line),
     }
 
 

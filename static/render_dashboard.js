@@ -68,13 +68,119 @@ function setMissionRowActive(code) {
 
 function buildMissionWorkflow(detail) {
   const code = detail?.code || "<movie_code>";
+  const translator = detail?.translator && detail.translator !== "-"
+    ? `/assigntr ${detail.translator}`
+    : "/assigntr <translator_name>";
   return [
     `/pick ${code}`,
     "/accept",
     "/assignui",
     "/team",
     "/submit",
-  ].join("\n");
+    translator,
+  ].join("
+");
+}
+
+function buildRoleTemplate(role) {
+  const roleName = role?.role || "ROLE";
+  const gender = String(role?.gender || "staff").toLowerCase() || "staff";
+  const assigned = String(role?.assigned || "-").trim();
+  return {
+    label: roleName,
+    template: `/assign ${roleName} <${gender}_staff_name>`,
+    assignedTemplate: assigned && assigned !== "-" ? `/assign ${roleName} ${assigned}` : "",
+    meta: `${gender.toUpperCase()} · ${role?.lines ?? "-"} lines`,
+  };
+}
+
+function renderRoleTemplates(detail, targetId) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.innerHTML = "";
+  const roles = Array.isArray(detail?.roles) ? detail.roles : [];
+  if (!roles.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Role templates appear when role data is available.";
+    target.appendChild(empty);
+    return;
+  }
+
+  roles.forEach((role) => {
+    const tpl = buildRoleTemplate(role);
+    const wrap = document.createElement("div");
+    wrap.className = "template-item";
+    const current = role?.assigned && role.assigned !== "-" ? ` · current ${role.assigned}` : "";
+    wrap.innerHTML = `
+      <div>
+        <strong>${tpl.label}</strong>
+        <div class="muted tiny">${tpl.meta}${current}</div>
+      </div>
+      <div class="row gap-sm wrap-row">
+        <button class="btn copy-command-btn" type="button" data-command="${tpl.template}">Template</button>
+        ${tpl.assignedTemplate ? `<button class="btn copy-command-btn" type="button" data-command="${tpl.assignedTemplate}">Assigned</button>` : ""}
+      </div>
+    `;
+    target.appendChild(wrap);
+  });
+  bindCopyButtons();
+  bindMissionModal();
+}
+
+function renderRoleList(detail, targetId) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.innerHTML = "";
+  const roles = Array.isArray(detail?.roles) ? detail.roles : [];
+  if (!roles.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No role data";
+    target.appendChild(empty);
+    return;
+  }
+
+  roles.forEach((item) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "role-item";
+    wrapper.innerHTML = `<strong>${item.role}</strong><span>${item.gender} · ${item.lines} lines</span><em>${item.assigned}</em>`;
+    target.appendChild(wrapper);
+  });
+}
+
+function renderMissionModal(detail) {
+  const title = document.getElementById("mission-modal-title");
+  const code = document.getElementById("mission-modal-code");
+  const workflow = document.getElementById("mission-modal-workflow");
+  const copyFlow = document.getElementById("mission-modal-copy-flow");
+  const highlights = document.getElementById("mission-modal-highlights");
+
+  if (title) title.textContent = detail?.title || "Select a mission";
+  if (code) code.textContent = detail?.code || "-";
+  const workflowText = buildMissionWorkflow(detail);
+  if (workflow) workflow.textContent = workflowText;
+  if (copyFlow) copyFlow.dataset.command = workflowText;
+
+  if (highlights) {
+    highlights.innerHTML = "";
+    const items = [
+      ["Client", detail?.client_name || "-"],
+      ["Tier", detail?.client_tier || "-"],
+      ["Priority", detail?.priority || "-"],
+      ["Translator", detail?.translator || "-"],
+    ];
+    items.forEach(([label, value]) => {
+      const card = document.createElement("div");
+      card.className = "highlight-card";
+      card.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+      highlights.appendChild(card);
+    });
+  }
+
+  renderRoleTemplates(detail, "mission-modal-templates");
+  renderRoleList(detail, "mission-modal-roles");
+  bindCopyButtons();
 }
 
 function renderMissionDetail(detail) {
@@ -92,7 +198,6 @@ function renderMissionDetail(detail) {
   const pickLink = document.getElementById("detail-pick-link");
   const cmdPick = document.getElementById("cmd-pick");
   const modifiers = document.getElementById("detail-modifiers");
-  const roles = document.getElementById("detail-roles");
   const jsonLink = document.getElementById("cmd-json-detail");
   const cmdAccept = document.getElementById("cmd-accept");
   const cmdAssign = document.getElementById("cmd-assignui");
@@ -100,6 +205,7 @@ function renderMissionDetail(detail) {
   const cmdSubmit = document.getElementById("cmd-submit");
   const cmdCopyWorkflow = document.getElementById("cmd-copy-workflow");
   const workflowScript = document.getElementById("workflow-script");
+  const translatorTemplateBtn = document.getElementById("cmd-translator-template");
 
   if (title) title.textContent = detail.title || "-";
   if (code) code.textContent = detail.code || "-";
@@ -117,13 +223,16 @@ function renderMissionDetail(detail) {
     pickLink.textContent = command;
     pickLink.dataset.command = command;
   }
-  if (cmdPick) {
-    cmdPick.dataset.command = command;
-  }
+  if (cmdPick) cmdPick.dataset.command = command;
   if (cmdAccept) cmdAccept.dataset.command = "/accept";
   if (cmdAssign) cmdAssign.dataset.command = "/assignui";
   if (cmdTeam) cmdTeam.dataset.command = "/team";
   if (cmdSubmit) cmdSubmit.dataset.command = "/submit";
+  if (translatorTemplateBtn) {
+    translatorTemplateBtn.dataset.command = detail.translator && detail.translator !== "-"
+      ? `/assigntr ${detail.translator}`
+      : "/assigntr <translator_name>";
+  }
   const workflowText = buildMissionWorkflow(detail);
   if (cmdCopyWorkflow) cmdCopyWorkflow.dataset.command = workflowText;
   if (workflowScript) workflowScript.textContent = workflowText;
@@ -149,25 +258,12 @@ function renderMissionDetail(detail) {
     }
   }
 
-  if (roles) {
-    roles.innerHTML = "";
-    (detail.roles || []).forEach((item) => {
-      const wrapper = document.createElement("div");
-      wrapper.className = "role-item";
-      wrapper.innerHTML = `<strong>${item.role}</strong><span>${item.gender} · ${item.lines} lines</span><em>${item.assigned}</em>`;
-      roles.appendChild(wrapper);
-    });
-    if (!(detail.roles || []).length) {
-      const empty = document.createElement("div");
-      empty.className = "muted";
-      empty.textContent = "No role data";
-      roles.appendChild(empty);
-    }
-  }
-
+  renderRoleList(detail, "detail-roles");
+  renderRoleTemplates(detail, "detail-role-templates");
+  renderMissionModal(detail);
   setMissionRowActive(detail.code);
+  bindCopyButtons();
 }
-
 async function loadMissionDetail(url) {
   if (!url) return;
   try {
@@ -311,6 +407,32 @@ function bindCopyButtons() {
   document.querySelectorAll(".copy-command-btn").forEach((btn) => {
     btn.addEventListener("click", () => copyCommand(btn.dataset.command || btn.textContent || ""));
   });
+}
+
+
+function openMissionModal() {
+  const node = document.getElementById("mission-modal-backdrop");
+  if (node) node.classList.remove("hidden");
+}
+
+function closeMissionModal() {
+  const node = document.getElementById("mission-modal-backdrop");
+  if (node) node.classList.add("hidden");
+}
+
+function bindMissionModal() {
+  document.querySelectorAll(".js-open-mission-modal").forEach((btn) => {
+    btn.addEventListener("click", openMissionModal);
+  });
+  document.querySelectorAll(".js-close-mission-modal").forEach((btn) => {
+    btn.addEventListener("click", closeMissionModal);
+  });
+  const backdrop = document.getElementById("mission-modal-backdrop");
+  if (backdrop) {
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeMissionModal();
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

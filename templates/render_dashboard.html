@@ -83,9 +83,9 @@
     <main class="content">
       <section class="hero card" id="overview">
         <div class="hero-copy">
-          <div class="eyebrow">Operations Dashboard v17</div>
+          <div class="eyebrow">Operations Dashboard v18</div>
           <h2>Interactive mission operations with live search, fast webhook actions, and cleaner production-facing UI.</h2>
-          <p class="muted">This version adds Telegram-ready mission workflow panels, a sharper action deck, and richer inline game navigation while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
+          <p class="muted">This version adds a mission quick-view modal, quick assign templates, and smarter Telegram assignment filters while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
           <div class="pill-row wrap-row hero-meta">
             <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
@@ -341,7 +341,10 @@
                 <div class="detail-title" id="detail-title">{{ mission_detail.title if mission_detail else 'Select a mission' }}</div>
                 <div class="muted tiny" id="detail-code">{{ mission_detail.code if mission_detail else '-' }}</div>
               </div>
-              <button class="btn btn-primary copy-command-btn" type="button" id="detail-pick-link" data-command="/pick {{ mission_detail.code if mission_detail else '-' }}">/pick {{ mission_detail.code if mission_detail else '-' }}</button>
+              <div class="row gap-sm wrap-row">
+                <button class="btn btn-primary copy-command-btn" type="button" id="detail-pick-link" data-command="/pick {{ mission_detail.code if mission_detail else '-' }}">/pick {{ mission_detail.code if mission_detail else '-' }}</button>
+                <button class="btn js-open-mission-modal" type="button" id="open-mission-modal-btn">Open detail modal</button>
+              </div>
             </div>
 
             <div class="detail-highlight-grid">
@@ -392,6 +395,36 @@
               </div>
               <pre id="workflow-script">{{ mission_workflow.workflow_text }}</pre>
               <div class="tiny muted">Generated from the selected mission code and refreshed live when you click a new mission row.</div>
+            </div>
+
+            <div class="detail-section">
+              <div class="row space-between wrap-row gap-md">
+                <div>
+                  <div class="section-title">Quick assign templates</div>
+                  <p class="muted">Copy ready-made translator and role assignment commands without typing them manually.</p>
+                </div>
+                <button class="btn copy-command-btn" type="button" id="cmd-translator-template" data-command="{{ mission_workflow.translator_template }}">Copy translator template</button>
+              </div>
+              <div class="role-template-list" id="detail-role-templates">
+                {% if mission_workflow.role_templates %}
+                  {% for item in mission_workflow.role_templates %}
+                  <div class="template-item">
+                    <div>
+                      <strong>{{ item.role }}</strong>
+                      <div class="muted tiny">{{ item.gender|upper }}{% if item.assigned and item.assigned != '-' %} · current {{ item.assigned }}{% endif %}</div>
+                    </div>
+                    <div class="row gap-sm wrap-row">
+                      <button class="btn copy-command-btn" type="button" data-command="{{ item.template }}">Template</button>
+                      {% if item.assigned_template %}
+                      <button class="btn copy-command-btn" type="button" data-command="{{ item.assigned_template }}">Assigned</button>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="muted">Role templates appear when a mission with role data is selected.</div>
+                {% endif %}
+              </div>
             </div>
 
             <div class="detail-section">
@@ -469,8 +502,43 @@
     </main>
   </div>
 
-  <script>
-    window.DASHBOARD_API_STATUS = "{{ api_status_path }}";
+
+  <div class="modal-backdrop hidden" id="mission-modal-backdrop">
+    <div class="mission-modal card" role="dialog" aria-modal="true" aria-labelledby="mission-modal-title">
+      <div class="row space-between wrap-row gap-md mission-modal-head">
+        <div>
+          <div class="section-title">Mission quick view</div>
+          <h3 id="mission-modal-title">{{ mission_detail.title if mission_detail else 'Select a mission' }}</h3>
+          <div class="muted tiny" id="mission-modal-code">{{ mission_detail.code if mission_detail else '-' }}</div>
+        </div>
+        <div class="row gap-sm wrap-row">
+          <button class="btn copy-command-btn" type="button" id="mission-modal-copy-flow" data-command="{{ mission_workflow.workflow_text }}">Copy workflow</button>
+          <button class="btn js-close-mission-modal" type="button">Close</button>
+        </div>
+      </div>
+      <div class="mission-modal-grid">
+        <div class="stack gap-md">
+          <div class="detail-highlight-grid compact-grid" id="mission-modal-highlights"></div>
+          <div class="detail-section">
+            <div class="section-title">Telegram workflow</div>
+            <pre id="mission-modal-workflow">{{ mission_workflow.workflow_text }}</pre>
+          </div>
+        </div>
+        <div class="stack gap-md">
+          <div class="detail-section">
+            <div class="section-title">Role assign templates</div>
+            <div class="role-template-list" id="mission-modal-templates"></div>
+          </div>
+          <div class="detail-section">
+            <div class="section-title">Role breakdown</div>
+            <div class="role-list" id="mission-modal-roles"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>    window.DASHBOARD_API_STATUS = "{{ api_status_path }}";
     window.DASHBOARD_ACTION_SETUP = "{{ api_action_setup_path }}";
     window.DASHBOARD_ACTION_DELETE = "{{ api_action_delete_path }}";
     window.DASHBOARD_ACTION_INFO = "{{ api_action_info_path }}";

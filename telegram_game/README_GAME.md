@@ -1,31 +1,33 @@
-# Telegram UI Notes — v17 Mission Workflow Update
+# Telegram UI Notes — v18 Modal + Assign Filter Update
 
-## Main improvements
+## New in v18
 
-- added `/missionsui [page]` for a paged mission browser
-- selected mission replies now open with a faster action keyboard
-- assign UI now supports pagination for translator picks and role pages
-- role picker now supports candidate pagination
-- website mission detail now generates a Telegram-ready workflow block
+- `/assignui` now supports richer filtering through inline buttons
+  - translator filters: `all`, `fresh`, `calm`
+  - role list filters: `all`, `male`, `female`
+- role picker now supports energy filters
+  - `all`, `fresh`, `tired`
+- website dashboard now includes:
+  - mission detail modal
+  - quick assign templates
+  - copy-ready translator and role assignment actions
 
-## Recommended flow
+## Suggested flow
 
 ```text
 /start
-/menu
 /missionsui
-/pick BN-260320-01
 /accept
 /assignui
 /team
 /submit
-/gearui
-/rosterui
 ```
 
-## Button layout highlights
+## Gear / staff flow
 
-- Mission UI for paged mission selection
-- Assign UI with translator and role pages
-- Roster UI for staff browsing
-- Gear UI for equipment and training loop
+```text
+/rosterui
+/staff Alya
+/gearui
+/gearshop
+```

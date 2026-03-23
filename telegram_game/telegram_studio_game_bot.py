@@ -362,14 +362,59 @@ def _all_translator_candidates(state):
     )
 
 
-def _all_role_candidates(state, role_name: str):
+def _normalize_tr_filter(value: Optional[str]) -> str:
+    raw = (value or "all").strip().lower()
+    return raw if raw in {"all", "fresh", "calm"} else "all"
+
+
+def _normalize_role_gender_filter(value: Optional[str]) -> str:
+    raw = (value or "all").strip().lower()
+    return raw if raw in {"all", "male", "female"} else "all"
+
+
+def _normalize_energy_filter(value: Optional[str]) -> str:
+    raw = (value or "all").strip().lower()
+    return raw if raw in {"all", "fresh", "tired"} else "all"
+
+
+def _apply_translator_filter(candidates, filter_name: str):
+    filter_name = _normalize_tr_filter(filter_name)
+    if filter_name == "fresh":
+        filtered = [member for member in candidates if member.energy >= 70]
+        return filtered or candidates
+    if filter_name == "calm":
+        filtered = [member for member in candidates if member.burnout <= 35]
+        return filtered or candidates
+    return candidates
+
+
+def _apply_role_list_filter(roles, gender_filter: str):
+    gender_filter = _normalize_role_gender_filter(gender_filter)
+    if gender_filter == "all":
+        return roles
+    filtered = [role for role in roles if (role.gender or "").lower() == gender_filter]
+    return filtered or roles
+
+
+def _apply_role_energy_filter(candidates, energy_filter: str):
+    energy_filter = _normalize_energy_filter(energy_filter)
+    if energy_filter == "fresh":
+        filtered = [member for member in candidates if member.energy >= 70]
+        return filtered or candidates
+    if energy_filter == "tired":
+        filtered = [member for member in candidates if member.energy < 70]
+        return filtered or candidates
+    return candidates
+
+
+def _all_role_candidates(state, role_name: str, energy_filter: str = "all"):
     mission = _ensure_bot_mission(state)
     role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
     if role is None:
         return []
     pool = [member for member in state.roster if member.role_type == role.gender]
     assigned = {member.name for member in assigned_staff_members(state, mission) if member.name != mission.assigned_roles.get(role.role)}
-    return sorted(
+    ranked = sorted(
         pool,
         key=lambda member: (
             member.name not in assigned,
@@ -379,7 +424,7 @@ def _all_role_candidates(state, role_name: str):
         ),
         reverse=True,
     )
-
+    return _apply_role_energy_filter(ranked, energy_filter)
 
 def _selected_mission_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -389,12 +434,21 @@ def _selected_mission_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1) -> InlineKeyboardMarkup:
+def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1, tr_filter: str = "all", role_gender: str = "all") -> InlineKeyboardMarkup:
     mission = _ensure_bot_mission(state)
+    tr_filter = _normalize_tr_filter(tr_filter)
+    role_gender = _normalize_role_gender_filter(role_gender)
     rows: list[list[InlineKeyboardButton]] = []
-    tr_candidates, tr_page, tr_pages, _ = _paginate_items(_all_translator_candidates(state), tr_page, per_page=4)
+
+    filtered_translators = _apply_translator_filter(_all_translator_candidates(state), tr_filter)
+    tr_candidates, tr_page, tr_pages, _ = _paginate_items(filtered_translators, tr_page, per_page=4)
     if tr_candidates:
         rows.append([InlineKeyboardButton("📝 Translator picks", callback_data="g|noop")])
+        rows.append([
+            InlineKeyboardButton(f"TR {'●' if tr_filter == 'all' else ''}All", callback_data=f"g|assignnav|1|{role_page}|all|{role_gender}"),
+            InlineKeyboardButton(f"TR {'●' if tr_filter == 'fresh' else ''}Fresh", callback_data=f"g|assignnav|1|{role_page}|fresh|{role_gender}"),
+            InlineKeyboardButton(f"TR {'●' if tr_filter == 'calm' else ''}Calm", callback_data=f"g|assignnav|1|{role_page}|calm|{role_gender}"),
+        ])
         for idx in range(0, len(tr_candidates), 2):
             chunk = tr_candidates[idx:idx+2]
             rows.append([
@@ -403,26 +457,32 @@ def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1) -> InlineKe
             ])
         nav: list[InlineKeyboardButton] = []
         if tr_page > 1:
-            nav.append(InlineKeyboardButton("⬅️ TR", callback_data=f"g|assignnav|{tr_page-1}|{role_page}"))
+            nav.append(InlineKeyboardButton("⬅️ TR", callback_data=f"g|assignnav|{tr_page-1}|{role_page}|{tr_filter}|{role_gender}"))
         if tr_page < tr_pages:
-            nav.append(InlineKeyboardButton("TR ➡️", callback_data=f"g|assignnav|{tr_page+1}|{role_page}"))
+            nav.append(InlineKeyboardButton("TR ➡️", callback_data=f"g|assignnav|{tr_page+1}|{role_page}|{tr_filter}|{role_gender}"))
         if nav:
             rows.append(nav)
 
-    role_items, role_page, role_pages, _ = _paginate_items(list(mission.roles), role_page, per_page=4)
+    filtered_roles = _apply_role_list_filter(list(mission.roles), role_gender)
+    role_items, role_page, role_pages, _ = _paginate_items(filtered_roles, role_page, per_page=4)
     if role_items:
         rows.append([InlineKeyboardButton("🎙 Role picks", callback_data="g|noop")])
+        rows.append([
+            InlineKeyboardButton(f"{'●' if role_gender == 'all' else ''}All Roles", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|all"),
+            InlineKeyboardButton(f"{'●' if role_gender == 'male' else ''}Male", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|male"),
+            InlineKeyboardButton(f"{'●' if role_gender == 'female' else ''}Female", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|female"),
+        ])
         role_buttons = [
-            InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}|1")
+            InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}|1|all")
             for role in role_items
         ]
         for idx in range(0, len(role_buttons), 2):
             rows.append(role_buttons[idx:idx+2])
         nav = []
         if role_page > 1:
-            nav.append(InlineKeyboardButton("⬅️ Roles", callback_data=f"g|assignnav|{tr_page}|{role_page-1}"))
+            nav.append(InlineKeyboardButton("⬅️ Roles", callback_data=f"g|assignnav|{tr_page}|{role_page-1}|{tr_filter}|{role_gender}"))
         if role_page < role_pages:
-            nav.append(InlineKeyboardButton("Roles ➡️", callback_data=f"g|assignnav|{tr_page}|{role_page+1}"))
+            nav.append(InlineKeyboardButton("Roles ➡️", callback_data=f"g|assignnav|{tr_page}|{role_page+1}|{tr_filter}|{role_gender}"))
         if nav:
             rows.append(nav)
 
@@ -434,9 +494,15 @@ def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1) -> InlineKe
     return InlineKeyboardMarkup(rows)
 
 
-def _role_picker_keyboard(state, role_name: str, page: int = 1) -> InlineKeyboardMarkup:
-    candidates, page, total_pages, _ = _paginate_items(_all_role_candidates(state, role_name), page, per_page=6)
+def _role_picker_keyboard(state, role_name: str, page: int = 1, energy_filter: str = "all") -> InlineKeyboardMarkup:
+    energy_filter = _normalize_energy_filter(energy_filter)
+    candidates, page, total_pages, _ = _paginate_items(_all_role_candidates(state, role_name, energy_filter=energy_filter), page, per_page=6)
     rows: list[list[InlineKeyboardButton]] = []
+    rows.append([
+        InlineKeyboardButton(f"{'●' if energy_filter == 'all' else ''}All", callback_data=f"g|pickrole|{_name_token(role_name)}|1|all"),
+        InlineKeyboardButton(f"{'●' if energy_filter == 'fresh' else ''}Fresh", callback_data=f"g|pickrole|{_name_token(role_name)}|1|fresh"),
+        InlineKeyboardButton(f"{'●' if energy_filter == 'tired' else ''}Tired", callback_data=f"g|pickrole|{_name_token(role_name)}|1|tired"),
+    ])
     for idx in range(0, len(candidates), 2):
         chunk = candidates[idx:idx+2]
         rows.append([
@@ -445,9 +511,9 @@ def _role_picker_keyboard(state, role_name: str, page: int = 1) -> InlineKeyboar
         ])
     nav: list[InlineKeyboardButton] = []
     if page > 1:
-        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|pickrole|{_name_token(role_name)}|{page-1}"))
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|pickrole|{_name_token(role_name)}|{page-1}|{energy_filter}"))
     if page < total_pages:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|pickrole|{_name_token(role_name)}|{page+1}"))
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|pickrole|{_name_token(role_name)}|{page+1}|{energy_filter}"))
     if nav:
         rows.append(nav)
     rows.append([
@@ -455,7 +521,6 @@ def _role_picker_keyboard(state, role_name: str, page: int = 1) -> InlineKeyboar
         InlineKeyboardButton("👥 Team", callback_data="g|team"),
     ])
     return InlineKeyboardMarkup(rows)
-
 
 def _submit_warning_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -658,37 +723,43 @@ def _board_text(state) -> str:
     return chr(10).join(chunks)
 
 
-def _assign_ui_text(state, tr_page: int = 1, role_page: int = 1) -> str:
+def _assign_ui_text(state, tr_page: int = 1, role_page: int = 1, tr_filter: str = "all", role_gender: str = "all") -> str:
     mission = _ensure_bot_mission(state)
     tr = mission.assigned_translator or "-"
-    _, safe_tr_page, tr_pages, tr_total = _paginate_items(_all_translator_candidates(state), tr_page, per_page=4)
-    _, safe_role_page, role_pages, role_total = _paginate_items(list(mission.roles), role_page, per_page=4)
+    tr_filter = _normalize_tr_filter(tr_filter)
+    role_gender = _normalize_role_gender_filter(role_gender)
+    filtered_translators = _apply_translator_filter(_all_translator_candidates(state), tr_filter)
+    filtered_roles = _apply_role_list_filter(list(mission.roles), role_gender)
+    _, safe_tr_page, tr_pages, tr_total = _paginate_items(filtered_translators, tr_page, per_page=4)
+    _, safe_role_page, role_pages, role_total = _paginate_items(filtered_roles, role_page, per_page=4)
     lines = [
         f"🧠 Assign panel — {mission.code}",
         mission.title,
         f"Translator: {tr}",
-        f"Translator page {safe_tr_page}/{tr_pages} · candidates {tr_total}",
-        f"Role page {safe_role_page}/{role_pages} · roles {role_total}",
+        f"Translator page {safe_tr_page}/{tr_pages} · candidates {tr_total} · filter {tr_filter}",
+        f"Role page {safe_role_page}/{role_pages} · roles {role_total} · gender filter {role_gender}",
         "Roles:",
     ]
     for role in mission.roles:
-        lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.lines} lines)")
+        lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.gender} · {role.lines} lines)")
     lines.append("")
-    lines.append("Use the translator and role pages below to browse more candidates.")
+    lines.append("Use translator filters for fresh/calm candidates and role filters for male or female slots.")
     return chr(10).join(lines)
 
 
-def _role_picker_text(state, role_name: str, page: int = 1) -> str:
+def _role_picker_text(state, role_name: str, page: int = 1, energy_filter: str = "all") -> str:
     mission = _ensure_bot_mission(state)
     role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
     if role is None:
         return f"❌ Role {role_name} tak jumpa."
-    candidates, page, total_pages, total = _paginate_items(_all_role_candidates(state, role.role), page, per_page=6)
+    energy_filter = _normalize_energy_filter(energy_filter)
+    candidates, page, total_pages, total = _paginate_items(_all_role_candidates(state, role.role, energy_filter=energy_filter), page, per_page=6)
     lines = [
         f"🎯 Pilih VO untuk {role.role}",
         f"Gender: {role.gender}",
         f"Lines: {role.lines}",
         f"Current: {mission.assigned_roles.get(role.role, '-')}",
+        f"Energy filter: {energy_filter}",
         f"Candidate page {page}/{total_pages} · total {total}",
         "",
         "Calon pada page ini:",
@@ -698,7 +769,6 @@ def _role_picker_text(state, role_name: str, page: int = 1) -> str:
     if not candidates:
         lines.append("- Tiada calon yang sesuai")
     return "\n".join(lines)
-
 
 def _submit_result_text(state, result: dict, db_info: Optional[dict] = None) -> str:
     verdict = "🏆 QA LULUS" if result["passed"] else "💥 QA GAGAL"
@@ -1034,8 +1104,13 @@ async def cmd_board(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_assignui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _ensure_bot_mission(state)
+    tr_filter = _normalize_tr_filter(context.args[0]) if getattr(context, "args", None) else "all"
+    role_gender = _normalize_role_gender_filter(context.args[1]) if getattr(context, "args", None) and len(context.args) > 1 else "all"
     _save(state)
-    await update.effective_message.reply_text(_assign_ui_text(state), reply_markup=_assign_ui_keyboard(state, tr_page=1, role_page=1))
+    await update.effective_message.reply_text(
+        _assign_ui_text(state, tr_page=1, role_page=1, tr_filter=tr_filter, role_gender=role_gender),
+        reply_markup=_assign_ui_keyboard(state, tr_page=1, role_page=1, tr_filter=tr_filter, role_gender=role_gender),
+    )
 
 
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1515,8 +1590,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             page = max(1, int(parts[3])) if len(parts) >= 4 else 1
         except ValueError:
             page = 1
+        energy_filter = _normalize_energy_filter(parts[4]) if len(parts) >= 5 else "all"
         _save(state)
-        await update.effective_message.reply_text(_role_picker_text(state, role_name, page=page), reply_markup=_role_picker_keyboard(state, role_name, page=page))
+        await update.effective_message.reply_text(
+            _role_picker_text(state, role_name, page=page, energy_filter=energy_filter),
+            reply_markup=_role_picker_keyboard(state, role_name, page=page, energy_filter=energy_filter),
+        )
         return
 
     if len(parts) >= 4 and parts[1] == "assignnav":
@@ -1530,8 +1609,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             role_page = max(1, int(parts[3]))
         except ValueError:
             role_page = 1
+        tr_filter = _normalize_tr_filter(parts[4]) if len(parts) >= 5 else "all"
+        role_gender = _normalize_role_gender_filter(parts[5]) if len(parts) >= 6 else "all"
         _save(state)
-        await update.effective_message.reply_text(_assign_ui_text(state, tr_page=tr_page, role_page=role_page), reply_markup=_assign_ui_keyboard(state, tr_page=tr_page, role_page=role_page))
+        await update.effective_message.reply_text(
+            _assign_ui_text(state, tr_page=tr_page, role_page=role_page, tr_filter=tr_filter, role_gender=role_gender),
+            reply_markup=_assign_ui_keyboard(state, tr_page=tr_page, role_page=role_page, tr_filter=tr_filter, role_gender=role_gender),
+        )
         return
 
     if len(parts) >= 4 and parts[1] == "setrole":
