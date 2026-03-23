@@ -832,3 +832,28 @@ pre {
     align-items: flex-start;
   }
 }
+
+
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.sim-warning-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--text-soft, #c8d2e6);
+}
+
+.sim-warning-list li {
+  margin-bottom: 8px;
+}
+
+#sim-workflow-script {
+  margin-top: 14px;
+}
+
+.no-pad {
+  padding: 0;
+}

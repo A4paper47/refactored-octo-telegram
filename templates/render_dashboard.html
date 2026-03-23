@@ -85,7 +85,7 @@
         <div class="hero-copy">
           <div class="eyebrow">Operations Dashboard v18</div>
           <h2>Interactive mission operations with live search, fast webhook actions, and cleaner production-facing UI.</h2>
-          <p class="muted">This version adds a mission quick-view modal, quick assign templates, and smarter Telegram assignment filters while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
+          <p class="muted">This version adds a mission simulator, preset-driven assign recommendations, and a more operator-friendly workflow deck while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
           <div class="pill-row wrap-row hero-meta">
             <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
@@ -427,6 +427,35 @@
               </div>
             </div>
 
+
+            <div class="detail-section" id="mission-simulator-card">
+              <div class="row space-between wrap-row gap-md">
+                <div>
+                  <div class="section-title">Mission simulator</div>
+                  <p class="muted">A quick operator playbook generated from urgency, language, client tier, and modifier pressure.</p>
+                </div>
+                <button class="btn btn-primary copy-command-btn" type="button" id="cmd-copy-sim-flow" data-command="{{ mission_simulation.workflow_text }}">Copy preset flow</button>
+              </div>
+              <div class="detail-highlight-grid compact-grid" id="sim-highlight-grid">
+                <div class="highlight-card"><span>Recommended preset</span><strong id="sim-preset">{{ mission_simulation.preset }}</strong></div>
+                <div class="highlight-card"><span>Urgency</span><strong id="sim-urgency">{{ mission_simulation.urgency_score }}</strong></div>
+                <div class="highlight-card"><span>Polish</span><strong id="sim-polish">{{ mission_simulation.polish_score }}</strong></div>
+                <div class="highlight-card"><span>Staffing load</span><strong id="sim-staffing">{{ mission_simulation.staffing_score }}</strong></div>
+              </div>
+              <div class="sim-grid">
+                <div class="detail-item"><span>Translator playbook</span><strong id="sim-translator-focus">{{ mission_simulation.translator_focus }}</strong></div>
+                <div class="detail-item"><span>VO playbook</span><strong id="sim-vo-focus">{{ mission_simulation.vo_focus }}</strong></div>
+              </div>
+              <div class="detail-section no-pad">
+                <div class="section-title">Operator warnings</div>
+                <ul class="sim-warning-list" id="sim-warning-list">
+                  {% for item in mission_simulation.warnings %}
+                  <li>{{ item }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+              <pre id="sim-workflow-script">{{ mission_simulation.workflow_text }}</pre>
+            </div>
             <div class="detail-section">
               <div class="section-title">Modifiers</div>
               <div class="chip-row" id="detail-modifiers">
@@ -543,6 +572,7 @@
     window.DASHBOARD_ACTION_DELETE = "{{ api_action_delete_path }}";
     window.DASHBOARD_ACTION_INFO = "{{ api_action_info_path }}";
     window.DASHBOARD_API_WORKFLOW_BASE = "{{ api_mission_workflow_base }}";
+    window.DASHBOARD_API_SIMULATE_BASE = "{{ api_mission_simulate_base }}";
   </script>
   <script src="{{ url_for('static', filename='render_dashboard.js') }}"></script>
 </body>

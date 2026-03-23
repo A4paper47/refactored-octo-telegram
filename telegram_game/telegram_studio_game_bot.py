@@ -162,6 +162,7 @@ Core controls:
 /pick <code> — load a DB mission
 /board — board snapshot
 /assignui — assign with buttons
+/assignpreset <recommended|lang|workload|trait> — smart auto-fill using a preset
 /team /bench /roster — staff overview
 /rosterui [page] — paged staff browser
 /staff <name> — staff profile
@@ -196,7 +197,7 @@ def _home_text(state) -> str:
         f"- Translator: {mission.assigned_translator or '-'}",
         f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
         "",
-        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /missionsui for paged mission picking and /rosterui for paged staff browsing.",
+        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /missionsui for paged mission picking, /rosterui for paged staff browsing, and /assignpreset recommended for one-tap smart casting.",
     ]
     return chr(10).join(lines)
 
@@ -288,6 +289,117 @@ def _name_from_token(value: str) -> str:
     return unquote(value or "").strip()
 
 
+ASSIGN_PRESET_ALIASES = {
+    "rec": "recommended",
+    "recommended": "recommended",
+    "smart": "recommended",
+    "lang": "lang",
+    "language": "lang",
+    "load": "workload",
+    "workload": "workload",
+    "trait": "trait",
+    "traits": "trait",
+}
+
+
+def _normalize_assign_preset(value: Optional[str]) -> str:
+    raw = (value or "recommended").strip().lower()
+    return ASSIGN_PRESET_ALIASES.get(raw, "recommended")
+
+
+def _recommended_assign_preset(state) -> str:
+    mission = _ensure_bot_mission(state)
+    modifiers = {str(item).strip().lower() for item in (mission.modifiers or []) if str(item).strip()}
+    priority = (mission.priority or "").strip().lower()
+    if priority in {"urgent", "superurgent"} or {"rush_rewrite", "overnight_push", "tight_deadline"} & modifiers:
+        return "workload"
+    if (mission.lang or "").strip().lower() not in {"en", "ms"} or {"glossary_lock", "sub_style_lock", "localized_terms"} & modifiers:
+        return "lang"
+    if mission.client_tier in {"premium", "enterprise", "broadcast"} or {"premium_notes", "lip_sync_heavy"} & modifiers:
+        return "trait"
+    return "trait"
+
+
+def _effective_assign_preset(state, preset: Optional[str]) -> str:
+    normalized = _normalize_assign_preset(preset)
+    return _recommended_assign_preset(state) if normalized == "recommended" else normalized
+
+
+def _preset_caption(state, preset: Optional[str]) -> str:
+    normalized = _normalize_assign_preset(preset)
+    effective = _effective_assign_preset(state, normalized)
+    if normalized == "recommended":
+        return f"recommended → {effective}"
+    return effective
+
+
+def _translator_preset_bonus(member, mission, preset: str) -> float:
+    preset = _normalize_assign_preset(preset)
+    traits = set(member.traits or [])
+    priority = (mission.priority or "").strip().lower()
+    modifiers = {str(item).strip().lower() for item in (mission.modifiers or []) if str(item).strip()}
+    lang = (mission.lang or "").strip().lower()
+    bonus = 0.0
+    if preset == "lang":
+        if "polyglot" in traits:
+            bonus += 24.0 if lang not in {"en", "ms"} else 14.0
+        if "perfectionist" in traits:
+            bonus += 6.0
+        if "glossary_lock" in modifiers:
+            bonus += 8.0
+    elif preset == "workload":
+        bonus += member.energy * 0.42
+        bonus -= member.burnout * 1.35
+        if "resilient" in traits:
+            bonus += 9.0
+        if priority in {"urgent", "superurgent"} and "sprinter" in traits:
+            bonus += 8.0
+    elif preset == "trait":
+        if "perfectionist" in traits:
+            bonus += 15.0
+        if "veteran" in traits:
+            bonus += 10.0
+        if "polyglot" in traits:
+            bonus += 8.0
+        if "resilient" in traits:
+            bonus += 6.0
+    return round(bonus, 2)
+
+
+def _role_preset_bonus(member, mission, role, preset: str) -> float:
+    preset = _normalize_assign_preset(preset)
+    traits = set(member.traits or [])
+    priority = (mission.priority or "").strip().lower()
+    modifiers = {str(item).strip().lower() for item in (mission.modifiers or []) if str(item).strip()}
+    bonus = 0.0
+    if preset == "lang":
+        if "natural" in traits:
+            bonus += 12.0
+        if "charmer" in traits and role.gender == member.role_type:
+            bonus += 8.0
+        if "lip_sync_heavy" in modifiers:
+            bonus += 8.0
+    elif preset == "workload":
+        bonus += member.energy * 0.34
+        bonus -= member.burnout * 1.28
+        if "resilient" in traits:
+            bonus += 9.0
+        if role.lines >= 90 and "workhorse" in traits:
+            bonus += 10.0
+        if priority in {"urgent", "superurgent"} and "sprinter" in traits:
+            bonus += 8.0
+    elif preset == "trait":
+        if "natural" in traits:
+            bonus += 12.0
+        if "veteran" in traits:
+            bonus += 10.0
+        if "workhorse" in traits:
+            bonus += 8.0
+        if "charmer" in traits:
+            bonus += 7.0
+    return round(bonus, 2)
+
+
 def _staff_rank_for_translator(member, mission) -> float:
     score = member.power() + member.energy * 0.22 - member.burnout * 0.95
     traits = set(member.traits or [])
@@ -352,12 +464,17 @@ def _paginate_items(items, page: int = 1, per_page: int = 4):
     return items[start:start + per_page], safe_page, total_pages, total
 
 
-def _all_translator_candidates(state):
+def _all_translator_candidates(state, preset: str = "recommended"):
     mission = _ensure_bot_mission(state)
+    effective = _effective_assign_preset(state, preset)
     pool = [member for member in state.roster if member.role_type == "translator"]
     return sorted(
         pool,
-        key=lambda member: (_staff_rank_for_translator(member, mission), member.level, member.name.lower()),
+        key=lambda member: (
+            _staff_rank_for_translator(member, mission) + _translator_preset_bonus(member, mission, effective),
+            member.level,
+            member.name.lower(),
+        ),
         reverse=True,
     )
 
@@ -407,18 +524,33 @@ def _apply_role_energy_filter(candidates, energy_filter: str):
     return candidates
 
 
-def _all_role_candidates(state, role_name: str, energy_filter: str = "all"):
+def _safe_all_translator_candidates(state, preset: str = "recommended"):
+    try:
+        return _all_translator_candidates(state, preset=preset)
+    except TypeError:
+        return _all_translator_candidates(state)
+
+
+def _safe_all_role_candidates(state, role_name: str, energy_filter: str = "all", preset: str = "recommended"):
+    try:
+        return _all_role_candidates(state, role_name, energy_filter=energy_filter, preset=preset)
+    except TypeError:
+        return _all_role_candidates(state, role_name, energy_filter=energy_filter)
+
+
+def _all_role_candidates(state, role_name: str, energy_filter: str = "all", preset: str = "recommended"):
     mission = _ensure_bot_mission(state)
     role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
     if role is None:
         return []
+    effective = _effective_assign_preset(state, preset)
     pool = [member for member in state.roster if member.role_type == role.gender]
     assigned = {member.name for member in assigned_staff_members(state, mission) if member.name != mission.assigned_roles.get(role.role)}
     ranked = sorted(
         pool,
         key=lambda member: (
             member.name not in assigned,
-            _staff_rank_for_role(member, mission, role),
+            _staff_rank_for_role(member, mission, role) + _role_preset_bonus(member, mission, role, effective),
             member.level,
             member.name.lower(),
         ),
@@ -429,25 +561,27 @@ def _all_role_candidates(state, role_name: str, energy_filter: str = "all"):
 def _selected_mission_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui")],
-        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
+        [InlineKeyboardButton("🪄 Preset", callback_data="g|assignpreset|recommended"), InlineKeyboardButton("👥 Team", callback_data="g|team")],
+        [InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1"), InlineKeyboardButton("🏠 Menu", callback_data="g|menu")],
     ])
 
 
-def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1, tr_filter: str = "all", role_gender: str = "all") -> InlineKeyboardMarkup:
+def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1, tr_filter: str = "all", role_gender: str = "all", preset: str = "recommended") -> InlineKeyboardMarkup:
     mission = _ensure_bot_mission(state)
     tr_filter = _normalize_tr_filter(tr_filter)
     role_gender = _normalize_role_gender_filter(role_gender)
+    preset = _normalize_assign_preset(preset)
     rows: list[list[InlineKeyboardButton]] = []
 
-    filtered_translators = _apply_translator_filter(_all_translator_candidates(state), tr_filter)
+    filtered_translators = _apply_translator_filter(_safe_all_translator_candidates(state, preset=preset), tr_filter)
     tr_candidates, tr_page, tr_pages, _ = _paginate_items(filtered_translators, tr_page, per_page=4)
     if tr_candidates:
         rows.append([InlineKeyboardButton("📝 Translator picks", callback_data="g|noop")])
         rows.append([
-            InlineKeyboardButton(f"TR {'●' if tr_filter == 'all' else ''}All", callback_data=f"g|assignnav|1|{role_page}|all|{role_gender}"),
-            InlineKeyboardButton(f"TR {'●' if tr_filter == 'fresh' else ''}Fresh", callback_data=f"g|assignnav|1|{role_page}|fresh|{role_gender}"),
-            InlineKeyboardButton(f"TR {'●' if tr_filter == 'calm' else ''}Calm", callback_data=f"g|assignnav|1|{role_page}|calm|{role_gender}"),
+            InlineKeyboardButton(f"TR {'●' if tr_filter == 'all' else ''}All", callback_data=f"g|assignnav|1|{role_page}|all|{role_gender}|{preset}"),
+            InlineKeyboardButton(f"TR {'●' if tr_filter == 'fresh' else ''}Fresh", callback_data=f"g|assignnav|1|{role_page}|fresh|{role_gender}|{preset}"),
+            InlineKeyboardButton(f"TR {'●' if tr_filter == 'calm' else ''}Calm", callback_data=f"g|assignnav|1|{role_page}|calm|{role_gender}|{preset}"),
         ])
         for idx in range(0, len(tr_candidates), 2):
             chunk = tr_candidates[idx:idx+2]
@@ -457,9 +591,9 @@ def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1, tr_filter: 
             ])
         nav: list[InlineKeyboardButton] = []
         if tr_page > 1:
-            nav.append(InlineKeyboardButton("⬅️ TR", callback_data=f"g|assignnav|{tr_page-1}|{role_page}|{tr_filter}|{role_gender}"))
+            nav.append(InlineKeyboardButton("⬅️ TR", callback_data=f"g|assignnav|{tr_page-1}|{role_page}|{tr_filter}|{role_gender}|{preset}"))
         if tr_page < tr_pages:
-            nav.append(InlineKeyboardButton("TR ➡️", callback_data=f"g|assignnav|{tr_page+1}|{role_page}|{tr_filter}|{role_gender}"))
+            nav.append(InlineKeyboardButton("TR ➡️", callback_data=f"g|assignnav|{tr_page+1}|{role_page}|{tr_filter}|{role_gender}|{preset}"))
         if nav:
             rows.append(nav)
 
@@ -468,21 +602,21 @@ def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1, tr_filter: 
     if role_items:
         rows.append([InlineKeyboardButton("🎙 Role picks", callback_data="g|noop")])
         rows.append([
-            InlineKeyboardButton(f"{'●' if role_gender == 'all' else ''}All Roles", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|all"),
-            InlineKeyboardButton(f"{'●' if role_gender == 'male' else ''}Male", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|male"),
-            InlineKeyboardButton(f"{'●' if role_gender == 'female' else ''}Female", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|female"),
+            InlineKeyboardButton(f"{'●' if role_gender == 'all' else ''}All Roles", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|all|{preset}"),
+            InlineKeyboardButton(f"{'●' if role_gender == 'male' else ''}Male", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|male|{preset}"),
+            InlineKeyboardButton(f"{'●' if role_gender == 'female' else ''}Female", callback_data=f"g|assignnav|{tr_page}|1|{tr_filter}|female|{preset}"),
         ])
         role_buttons = [
-            InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}|1|all")
+            InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}|1|all|{preset}")
             for role in role_items
         ]
         for idx in range(0, len(role_buttons), 2):
             rows.append(role_buttons[idx:idx+2])
         nav = []
         if role_page > 1:
-            nav.append(InlineKeyboardButton("⬅️ Roles", callback_data=f"g|assignnav|{tr_page}|{role_page-1}|{tr_filter}|{role_gender}"))
+            nav.append(InlineKeyboardButton("⬅️ Roles", callback_data=f"g|assignnav|{tr_page}|{role_page-1}|{tr_filter}|{role_gender}|{preset}"))
         if role_page < role_pages:
-            nav.append(InlineKeyboardButton("Roles ➡️", callback_data=f"g|assignnav|{tr_page}|{role_page+1}|{tr_filter}|{role_gender}"))
+            nav.append(InlineKeyboardButton("Roles ➡️", callback_data=f"g|assignnav|{tr_page}|{role_page+1}|{tr_filter}|{role_gender}|{preset}"))
         if nav:
             rows.append(nav)
 
@@ -490,18 +624,28 @@ def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1, tr_filter: 
         InlineKeyboardButton("👥 Team", callback_data="g|team"),
         InlineKeyboardButton("📤 Submit", callback_data="g|submit"),
     ])
-    rows.append([InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1"), InlineKeyboardButton("🏠 Menu", callback_data="g|menu")])
+    rows.append([
+        InlineKeyboardButton(f"Preset {'●' if preset == 'recommended' else ''}Rec", callback_data=f"g|assignnav|1|1|{tr_filter}|{role_gender}|recommended"),
+        InlineKeyboardButton(f"Lang {'●' if _effective_assign_preset(state, preset) == 'lang' else ''}", callback_data=f"g|assignnav|1|1|{tr_filter}|{role_gender}|lang"),
+        InlineKeyboardButton(f"Load {'●' if _effective_assign_preset(state, preset) == 'workload' else ''}", callback_data=f"g|assignnav|1|1|{tr_filter}|{role_gender}|workload"),
+    ])
+    rows.append([
+        InlineKeyboardButton(f"Trait {'●' if _effective_assign_preset(state, preset) == 'trait' else ''}", callback_data=f"g|assignnav|1|1|{tr_filter}|{role_gender}|trait"),
+        InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1"),
+        InlineKeyboardButton("🏠 Menu", callback_data="g|menu"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
-def _role_picker_keyboard(state, role_name: str, page: int = 1, energy_filter: str = "all") -> InlineKeyboardMarkup:
+def _role_picker_keyboard(state, role_name: str, page: int = 1, energy_filter: str = "all", preset: str = "recommended") -> InlineKeyboardMarkup:
     energy_filter = _normalize_energy_filter(energy_filter)
-    candidates, page, total_pages, _ = _paginate_items(_all_role_candidates(state, role_name, energy_filter=energy_filter), page, per_page=6)
+    preset = _normalize_assign_preset(preset)
+    candidates, page, total_pages, _ = _paginate_items(_safe_all_role_candidates(state, role_name, energy_filter=energy_filter, preset=preset), page, per_page=6)
     rows: list[list[InlineKeyboardButton]] = []
     rows.append([
-        InlineKeyboardButton(f"{'●' if energy_filter == 'all' else ''}All", callback_data=f"g|pickrole|{_name_token(role_name)}|1|all"),
-        InlineKeyboardButton(f"{'●' if energy_filter == 'fresh' else ''}Fresh", callback_data=f"g|pickrole|{_name_token(role_name)}|1|fresh"),
-        InlineKeyboardButton(f"{'●' if energy_filter == 'tired' else ''}Tired", callback_data=f"g|pickrole|{_name_token(role_name)}|1|tired"),
+        InlineKeyboardButton(f"{'●' if energy_filter == 'all' else ''}All", callback_data=f"g|pickrole|{_name_token(role_name)}|1|all|{preset}"),
+        InlineKeyboardButton(f"{'●' if energy_filter == 'fresh' else ''}Fresh", callback_data=f"g|pickrole|{_name_token(role_name)}|1|fresh|{preset}"),
+        InlineKeyboardButton(f"{'●' if energy_filter == 'tired' else ''}Tired", callback_data=f"g|pickrole|{_name_token(role_name)}|1|tired|{preset}"),
     ])
     for idx in range(0, len(candidates), 2):
         chunk = candidates[idx:idx+2]
@@ -511,9 +655,9 @@ def _role_picker_keyboard(state, role_name: str, page: int = 1, energy_filter: s
         ])
     nav: list[InlineKeyboardButton] = []
     if page > 1:
-        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|pickrole|{_name_token(role_name)}|{page-1}|{energy_filter}"))
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|pickrole|{_name_token(role_name)}|{page-1}|{energy_filter}|{preset}"))
     if page < total_pages:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|pickrole|{_name_token(role_name)}|{page+1}|{energy_filter}"))
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|pickrole|{_name_token(role_name)}|{page+1}|{energy_filter}|{preset}"))
     if nav:
         rows.append(nav)
     rows.append([
@@ -723,12 +867,13 @@ def _board_text(state) -> str:
     return chr(10).join(chunks)
 
 
-def _assign_ui_text(state, tr_page: int = 1, role_page: int = 1, tr_filter: str = "all", role_gender: str = "all") -> str:
+def _assign_ui_text(state, tr_page: int = 1, role_page: int = 1, tr_filter: str = "all", role_gender: str = "all", preset: str = "recommended") -> str:
     mission = _ensure_bot_mission(state)
     tr = mission.assigned_translator or "-"
     tr_filter = _normalize_tr_filter(tr_filter)
     role_gender = _normalize_role_gender_filter(role_gender)
-    filtered_translators = _apply_translator_filter(_all_translator_candidates(state), tr_filter)
+    preset = _normalize_assign_preset(preset)
+    filtered_translators = _apply_translator_filter(_safe_all_translator_candidates(state, preset=preset), tr_filter)
     filtered_roles = _apply_role_list_filter(list(mission.roles), role_gender)
     _, safe_tr_page, tr_pages, tr_total = _paginate_items(filtered_translators, tr_page, per_page=4)
     _, safe_role_page, role_pages, role_total = _paginate_items(filtered_roles, role_page, per_page=4)
@@ -738,22 +883,24 @@ def _assign_ui_text(state, tr_page: int = 1, role_page: int = 1, tr_filter: str 
         f"Translator: {tr}",
         f"Translator page {safe_tr_page}/{tr_pages} · candidates {tr_total} · filter {tr_filter}",
         f"Role page {safe_role_page}/{role_pages} · roles {role_total} · gender filter {role_gender}",
+        f"Preset: {_preset_caption(state, preset)}",
         "Roles:",
     ]
     for role in mission.roles:
         lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.gender} · {role.lines} lines)")
     lines.append("")
-    lines.append("Use translator filters for fresh/calm candidates and role filters for male or female slots.")
+    lines.append("Use translator filters for fresh/calm candidates, role filters for male/female slots, or switch preset to bias language, workload, or trait-fit picks.")
     return chr(10).join(lines)
 
 
-def _role_picker_text(state, role_name: str, page: int = 1, energy_filter: str = "all") -> str:
+def _role_picker_text(state, role_name: str, page: int = 1, energy_filter: str = "all", preset: str = "recommended") -> str:
     mission = _ensure_bot_mission(state)
     role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
     if role is None:
         return f"❌ Role {role_name} tak jumpa."
     energy_filter = _normalize_energy_filter(energy_filter)
-    candidates, page, total_pages, total = _paginate_items(_all_role_candidates(state, role.role, energy_filter=energy_filter), page, per_page=6)
+    preset = _normalize_assign_preset(preset)
+    candidates, page, total_pages, total = _paginate_items(_safe_all_role_candidates(state, role.role, energy_filter=energy_filter, preset=preset), page, per_page=6)
     lines = [
         f"🎯 Pilih VO untuk {role.role}",
         f"Gender: {role.gender}",
@@ -761,6 +908,7 @@ def _role_picker_text(state, role_name: str, page: int = 1, energy_filter: str =
         f"Current: {mission.assigned_roles.get(role.role, '-')}",
         f"Energy filter: {energy_filter}",
         f"Candidate page {page}/{total_pages} · total {total}",
+        f"Preset: {_preset_caption(state, preset)}",
         "",
         "Calon pada page ini:",
     ]
@@ -1106,11 +1254,41 @@ async def cmd_assignui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     _ensure_bot_mission(state)
     tr_filter = _normalize_tr_filter(context.args[0]) if getattr(context, "args", None) else "all"
     role_gender = _normalize_role_gender_filter(context.args[1]) if getattr(context, "args", None) and len(context.args) > 1 else "all"
+    preset = _normalize_assign_preset(context.args[2]) if getattr(context, "args", None) and len(context.args) > 2 else "recommended"
     _save(state)
     await update.effective_message.reply_text(
-        _assign_ui_text(state, tr_page=1, role_page=1, tr_filter=tr_filter, role_gender=role_gender),
-        reply_markup=_assign_ui_keyboard(state, tr_page=1, role_page=1, tr_filter=tr_filter, role_gender=role_gender),
+        _assign_ui_text(state, tr_page=1, role_page=1, tr_filter=tr_filter, role_gender=role_gender, preset=preset),
+        reply_markup=_assign_ui_keyboard(state, tr_page=1, role_page=1, tr_filter=tr_filter, role_gender=role_gender, preset=preset),
     )
+
+
+async def cmd_assignpreset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    mission = _ensure_bot_mission(state)
+    requested = (context.args[0] if getattr(context, "args", None) else "recommended")
+    preset = _effective_assign_preset(state, requested)
+    picks: dict[str, str] = {}
+    try:
+        translators = _safe_all_translator_candidates(state, preset=preset)
+        if translators:
+            picks["translator"] = assign_translator(state, translators[0].name)
+        for role in mission.roles:
+            candidates = _safe_all_role_candidates(state, role.role, energy_filter="all", preset=preset)
+            if candidates:
+                picks[role.role] = assign_role(state, role.role, candidates[0].name)
+        db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+        lines = [f"🧠 Assign preset applied: {_preset_caption(state, requested)}"]
+        for key, value in picks.items():
+            lines.append(f"- {key}: {value}")
+        if not picks:
+            lines.append("- No suitable staff available")
+        if db_info:
+            lines.append(f"DB synced: task #{db_info['translation_task_id']} · assignments +{db_info['assignment_created']}")
+        text = "\n".join(lines)
+    except Exception as exc:
+        text = f"❌ Assign preset gagal: {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state, preset=requested))
 
 
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1591,10 +1769,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except ValueError:
             page = 1
         energy_filter = _normalize_energy_filter(parts[4]) if len(parts) >= 5 else "all"
+        preset = _normalize_assign_preset(parts[5]) if len(parts) >= 6 else "recommended"
         _save(state)
         await update.effective_message.reply_text(
-            _role_picker_text(state, role_name, page=page, energy_filter=energy_filter),
-            reply_markup=_role_picker_keyboard(state, role_name, page=page, energy_filter=energy_filter),
+            _role_picker_text(state, role_name, page=page, energy_filter=energy_filter, preset=preset),
+            reply_markup=_role_picker_keyboard(state, role_name, page=page, energy_filter=energy_filter, preset=preset),
         )
         return
 
@@ -1611,10 +1790,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             role_page = 1
         tr_filter = _normalize_tr_filter(parts[4]) if len(parts) >= 5 else "all"
         role_gender = _normalize_role_gender_filter(parts[5]) if len(parts) >= 6 else "all"
+        preset = _normalize_assign_preset(parts[6]) if len(parts) >= 7 else "recommended"
         _save(state)
         await update.effective_message.reply_text(
-            _assign_ui_text(state, tr_page=tr_page, role_page=role_page, tr_filter=tr_filter, role_gender=role_gender),
-            reply_markup=_assign_ui_keyboard(state, tr_page=tr_page, role_page=role_page, tr_filter=tr_filter, role_gender=role_gender),
+            _assign_ui_text(state, tr_page=tr_page, role_page=role_page, tr_filter=tr_filter, role_gender=role_gender, preset=preset),
+            reply_markup=_assign_ui_keyboard(state, tr_page=tr_page, role_page=role_page, tr_filter=tr_filter, role_gender=role_gender, preset=preset),
         )
         return
 
@@ -1633,6 +1813,32 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             text = f"❌ {exc}"
         _save(state)
         await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state))
+        return
+
+    if len(parts) >= 3 and parts[1] == "assignpreset":
+        state = _load_or_create(update.effective_user.id)
+        _ensure_bot_mission(state)
+        requested = parts[2]
+        preset = _effective_assign_preset(state, requested)
+        picks: dict[str, str] = {}
+        try:
+            translators = _safe_all_translator_candidates(state, preset=preset)
+            if translators:
+                picks["translator"] = assign_translator(state, translators[0].name)
+            for role in state.current_mission.roles:
+                candidates = _safe_all_role_candidates(state, role.role, energy_filter="all", preset=preset)
+                if candidates:
+                    picks[role.role] = assign_role(state, role.role, candidates[0].name)
+            db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
+            text = "\n".join([f"🧠 Assign preset applied: {_preset_caption(state, requested)}", *[f"- {k}: {v}" for k, v in picks.items()]])
+            if not picks:
+                text += "\n- No suitable staff available"
+            if db_info:
+                text += f"\nDB synced: task #{db_info['translation_task_id']} · assignments +{db_info['assignment_created']}"
+        except Exception as exc:
+            text = f"❌ Assign preset gagal: {exc}"
+        _save(state)
+        await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state, preset=requested))
         return
 
     if len(parts) >= 2 and parts[1] == "gearshopui":
@@ -1799,6 +2005,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "missionsui": cmd_missionsui,
         "board": cmd_board,
         "assignui": cmd_assignui,
+        "assignpreset": cmd_assignpreset,
         "syncdb": cmd_syncdb,
         "accept": cmd_accept,
         "autocast": cmd_autocast,
@@ -1842,6 +2049,7 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("missionsui", cmd_missionsui))
     app.add_handler(CommandHandler("board", cmd_board))
     app.add_handler(CommandHandler("assignui", cmd_assignui))
+    app.add_handler(CommandHandler("assignpreset", cmd_assignpreset))
     app.add_handler(CommandHandler("pick", cmd_pick))
     app.add_handler(CommandHandler("syncdb", cmd_syncdb))
     app.add_handler(CommandHandler("accept", cmd_accept))

@@ -1,16 +1,17 @@
-# Telegram UI Notes — v18 Modal + Assign Filter Update
+# Telegram UI Notes — v19 Simulator + Assign Presets
 
-## New in v18
+## New in v19
 
-- `/assignui` now supports richer filtering through inline buttons
-  - translator filters: `all`, `fresh`, `calm`
-  - role list filters: `all`, `male`, `female`
-- role picker now supports energy filters
-  - `all`, `fresh`, `tired`
+- `/assignpreset <recommended|lang|workload|trait>` auto-fills translator and role picks using a smart preset
+- `/assignui` now shows and preserves an active preset across:
+  - translator filters
+  - role filters
+  - role picker pages
+- role picker and assign UI now surface the active preset in text for faster operator testing
 - website dashboard now includes:
-  - mission detail modal
-  - quick assign templates
-  - copy-ready translator and role assignment actions
+  - mission simulator panel
+  - recommended preset playbook
+  - copy-ready preset workflow
 
 ## Suggested flow
 
@@ -18,16 +19,16 @@
 /start
 /missionsui
 /accept
-/assignui
+/assignpreset recommended
 /team
 /submit
 ```
 
-## Gear / staff flow
+## Manual control flow
 
 ```text
-/rosterui
-/staff Alya
-/gearui
-/gearshop
+/assignui
+/assignpreset lang
+/assignpreset workload
+/assignpreset trait
 ```

@@ -1,18 +1,22 @@
-# Studio Dub Tycoon — Render Web Service Edition (v18)
+# Studio Dub Tycoon — Render Web Service Edition (v19)
 
 This package continues the cleaned Render Web Service build and extends both the dashboard and Telegram gameplay UI.
 
-## What changed in v18
+## What changed in v19
 
-- added **mission detail modal** on the dashboard for a faster full-screen quick view
-- added **quick assign templates** on the website for translator and role assignment commands
-- kept the mission workflow panel and copy deck from v17
-- upgraded Telegram **assign UI filters** for:
-  - translator freshness / calm burnout view
-  - role list filtering by gender
-  - role picker filtering by energy
-- preserved webhook-first Render deployment structure
-- updated build id to `20260323-v18-modal-filters-ui`
+- added **mission simulator** panel on the dashboard
+  - recommended assign preset
+  - operator playbook notes
+  - quick copy sequence
+  - API route for simulation payloads
+- upgraded Telegram assignment flow with **smart presets**
+  - `lang`
+  - `workload`
+  - `trait`
+  - `recommended`
+- added `/assignpreset <recommended|lang|workload|trait>` command
+- assign UI and role picker now preserve the active preset across pagination and filters
+- refreshed dashboard copy and build id to `20260323-v19-simulator-presets-ui`
 
 ## Deploy
 

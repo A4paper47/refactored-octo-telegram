@@ -78,8 +78,7 @@ function buildMissionWorkflow(detail) {
     "/team",
     "/submit",
     translator,
-  ].join("
-");
+  ].join("\n");
 }
 
 function buildRoleTemplate(role) {
@@ -183,6 +182,60 @@ function renderMissionModal(detail) {
   bindCopyButtons();
 }
 
+
+function renderMissionSimulation(simulation) {
+  if (!simulation) return;
+  const preset = document.getElementById("sim-preset");
+  const urgency = document.getElementById("sim-urgency");
+  const polish = document.getElementById("sim-polish");
+  const staffing = document.getElementById("sim-staffing");
+  const trFocus = document.getElementById("sim-translator-focus");
+  const voFocus = document.getElementById("sim-vo-focus");
+  const warnList = document.getElementById("sim-warning-list");
+  const workflow = document.getElementById("sim-workflow-script");
+  const copyBtn = document.getElementById("cmd-copy-sim-flow");
+
+  if (preset) preset.textContent = simulation.preset || "-";
+  if (urgency) urgency.textContent = String(simulation.urgency_score ?? "-");
+  if (polish) polish.textContent = String(simulation.polish_score ?? "-");
+  if (staffing) staffing.textContent = String(simulation.staffing_score ?? "-");
+  if (trFocus) trFocus.textContent = simulation.translator_focus || "-";
+  if (voFocus) voFocus.textContent = simulation.vo_focus || "-";
+  if (workflow) workflow.textContent = simulation.workflow_text || "";
+  if (copyBtn) copyBtn.dataset.command = simulation.workflow_text || "";
+  if (warnList) {
+    warnList.innerHTML = "";
+    const warnings = Array.isArray(simulation.warnings) ? simulation.warnings : [];
+    if (!warnings.length) {
+      const li = document.createElement("li");
+      li.textContent = "No warnings.";
+      warnList.appendChild(li);
+    } else {
+      warnings.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        warnList.appendChild(li);
+      });
+    }
+  }
+  bindCopyButtons();
+}
+
+async function loadMissionSimulation(code) {
+  const base = window.DASHBOARD_API_SIMULATE_BASE;
+  if (!base || !code) return;
+  const url = base.replace("__CODE__", encodeURIComponent(code));
+  try {
+    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    const data = await resp.json();
+    if (data.ok && data.simulation) {
+      renderMissionSimulation(data.simulation);
+    }
+  } catch (err) {
+    console.error("Failed to load mission simulation", err);
+  }
+}
+
 function renderMissionDetail(detail) {
   if (!detail) return;
   const title = document.getElementById("detail-title");
@@ -263,6 +316,7 @@ function renderMissionDetail(detail) {
   renderMissionModal(detail);
   setMissionRowActive(detail.code);
   bindCopyButtons();
+  loadMissionSimulation(detail.code);
 }
 async function loadMissionDetail(url) {
   if (!url) return;
@@ -449,6 +503,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const refreshBoardBtn = document.getElementById("refresh-board-btn");
   if (refreshBoardBtn) {
     refreshBoardBtn.addEventListener("click", () => window.location.reload());
+  }
+
+  const existingCode = (document.getElementById("detail-code")?.textContent || "").trim();
+  if (existingCode && existingCode !== "-") {
+    loadMissionSimulation(existingCode);
   }
 
   window.setInterval(refreshStatus, 20000);

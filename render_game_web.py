@@ -386,6 +386,68 @@ def _mission_workflow_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _mission_simulator_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any]:
+    detail = detail or {}
+    code = detail.get("code") or "<movie_code>"
+    priority = str(detail.get("priority") or "flexible").strip().lower()
+    lang = str(detail.get("lang") or "-").strip().lower()
+    tier = str(detail.get("client_tier") or "indie").strip().lower()
+    modifiers = [str(item).strip() for item in (detail.get("modifiers") or []) if str(item).strip()]
+    modifier_set = {item.lower() for item in modifiers}
+    active_tasks = int(detail.get("active_tasks") or 0)
+    roles = list(detail.get("roles") or [])
+
+    if priority in {"urgent", "superurgent"} or {"rush_rewrite", "overnight_push", "tight_deadline"} & modifier_set or active_tasks >= 2:
+        preset = "workload"
+    elif lang not in {"en", "ms", "-"} or {"glossary_lock", "localized_terms", "sub_style_lock"} & modifier_set:
+        preset = "lang"
+    elif tier in {"broadcast", "premium", "enterprise"} or {"premium_notes", "lip_sync_heavy"} & modifier_set:
+        preset = "trait"
+    else:
+        preset = "trait"
+
+    urgency = min(100, 30 + (28 if priority in {"urgent", "superurgent"} else 6) + active_tasks * 9 + (10 if "rush_rewrite" in modifier_set else 0))
+    polish = min(100, 24 + len(roles) * 7 + (18 if tier in {"premium", "enterprise", "broadcast"} else 4) + (12 if "premium_notes" in modifier_set else 0))
+    staffing = min(100, 26 + len(roles) * 12 + (8 if active_tasks else 0) + (10 if priority == "superurgent" else 0))
+
+    translator_focus = {
+        "lang": "Prioritise polyglot and glossary-safe translators. Keep terminology consistency high before speed.",
+        "workload": "Pick low-burnout, high-energy translators first. This mission values resilience and clean delivery under pressure.",
+        "trait": "Aim for veteran or perfectionist translators to protect polish, premium notes, and QA stability.",
+    }[preset]
+    vo_focus = {
+        "lang": "Use natural performers first, especially when lip-sync or localisation notes are likely to matter.",
+        "workload": "Use resilient or workhorse VO picks with spare energy to avoid fatigue during long takes.",
+        "trait": "Use natural, veteran, or charmer VO talent to maximise polish and client-facing performance.",
+    }[preset]
+
+    warnings: list[str] = []
+    if priority in {"urgent", "superurgent"}:
+        warnings.append("High urgency — favour stable staff and avoid burnout spikes.")
+    if lang not in {"en", "ms", "-"}:
+        warnings.append(f"Language focus: {lang.upper()} needs terminology-safe handling.")
+    if tier in {"premium", "enterprise", "broadcast"}:
+        warnings.append("Client tier is elevated — QA mistakes are more expensive.")
+    if "lip_sync_heavy" in modifier_set:
+        warnings.append("Lip-sync heavy material — natural VO traits are strongly preferred.")
+    if not warnings:
+        warnings.append("Balanced mission — operator can bias speed or polish depending on current studio condition.")
+
+    workflow_text = "\n".join([f"/pick {code}", "/accept", f"/assignpreset {preset}", "/team", "/submit"])
+    return {
+        "code": code,
+        "preset": preset,
+        "urgency_score": urgency,
+        "polish_score": polish,
+        "staffing_score": staffing,
+        "translator_focus": translator_focus,
+        "vo_focus": vo_focus,
+        "warnings": warnings,
+        "recommended_commands": [f"/pick {code}", "/accept", f"/assignpreset {preset}", "/team", "/submit"],
+        "workflow_text": workflow_text,
+    }
+
+
 def _manifest_payload() -> dict[str, Any]:
     total_kept = sum(len(items) for items in RUNTIME_FILE_GROUPS.values())
     total_removed = sum(len(items) for items in REMOVED_FILE_GROUPS.values())
@@ -467,6 +529,7 @@ def dashboard():
         selected_code=_selected_code(),
         mission_detail=detail,
         mission_workflow=_mission_workflow_payload(detail),
+        mission_simulation=_mission_simulator_payload(detail),
         setup_path=url_for("setup_webhook_route"),
         webhook_info_path=url_for("webhook_info_route"),
         delete_webhook_path=url_for("delete_webhook_route"),
@@ -475,6 +538,7 @@ def dashboard():
         api_manifest_path=url_for("api_manifest"),
         api_mission_detail_base=url_for("api_mission_detail", movie_code="__CODE__"),
         api_mission_workflow_base=url_for("api_mission_workflow", movie_code="__CODE__"),
+        api_mission_simulate_base=url_for("api_mission_simulate", movie_code="__CODE__"),
         api_action_setup_path=url_for("api_action_setup_webhook"),
         api_action_delete_path=url_for("api_action_delete_webhook"),
         api_action_info_path=url_for("api_action_webhook_info"),
@@ -510,6 +574,20 @@ def api_mission_detail(movie_code: str):
     if detail is None:
         return jsonify({"ok": False, "message": "Mission not found"}), 404
     return jsonify({"ok": True, "detail": detail})
+
+
+@app.route("/api/mission/<movie_code>/simulate")
+def api_mission_simulate(movie_code: str):
+    detail = {"code": movie_code}
+    if GAME_USE_DB and DATABASE_URL:
+        try:
+            state = new_game(user_id=0, studio_name="Render Dashboard")
+            db_detail = get_db_mission_detail(state, movie_code)
+            if db_detail:
+                detail = db_detail
+        except Exception as exc:  # pragma: no cover
+            return jsonify({"ok": False, "message": str(exc)}), 500
+    return jsonify({"ok": True, "simulation": _mission_simulator_payload(detail)})
 
 
 @app.route("/api/mission/<movie_code>/workflow")
