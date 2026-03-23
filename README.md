@@ -1,15 +1,28 @@
-# Studio Dub Tycoon — Render Web Service Edition (v12)
+# Studio Dub Tycoon — Render Web Service Edition (v13)
 
 This is the cleaned deployment package for the Telegram + web dashboard version of Studio Dub Tycoon.
+
+## What changed in v13
+
+- fixed the mission board SQLAlchemy app-registration error on the website
+- refreshed the website dashboard UI with a mission detail panel and better status cards
+- added `GET /api/mission/<movie_code>`
+- added v13 gameplay layer:
+  - inventory
+  - gear shop
+  - equip / unequip staff
+  - mission modifiers
+  - chest-style loot drops on successful submissions
 
 ## What is inside
 
 - Flask web service for Render webhook mode
 - Telegram game bot with inline UI
 - DB-backed mission board and write-back flow
-- Training / rest / achievement gameplay loop
-- Minimal runtime files only
-- Test suite for the current deployment path
+- training / rest / achievement gameplay loop
+- inventory / gear progression loop
+- minimal runtime files only
+- test suite for the current deployment path
 
 ## Render env vars
 
@@ -43,6 +56,7 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/health`
 - `/api/status`
 - `/api/missions`
+- `/api/mission/<movie_code>`
 - `/api/manifest`
 - `/telegram/setup-webhook`
 - `/telegram/webhook-info`
@@ -64,6 +78,11 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/bench`
 - `/roster`
 - `/staff <name>`
+- `/inventory`
+- `/gearshop`
+- `/buygear <item_key>`
+- `/equip <staff> <item_key>`
+- `/unequip <staff>`
 - `/market`
 - `/hire <name>`
 - `/fire <name>`
@@ -81,5 +100,6 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 ## Local test
 
 ```bash
-pytest -q telegram_game/test_game_engine.py telegram_game/test_db_integration.py telegram_game/test_render_web_service.py telegram_game/test_bot_callback.py telegram_game/test_v11_ui_cleanup.py
+pytest -q
+python -m py_compile telegram_game/*.py render_game_web.py
 ```

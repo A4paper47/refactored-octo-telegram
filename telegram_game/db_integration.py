@@ -408,6 +408,7 @@ def _build_candidate_info(movie: Movie, state: GameState) -> Dict[str, object]:
     return {
         "code": mission.code,
         "title": mission.title,
+        "year": mission.year,
         "status": movie.status,
         "priority": mission.priority,
         "lang": mission.lang,
@@ -416,6 +417,11 @@ def _build_candidate_info(movie: Movie, state: GameState) -> Dict[str, object]:
         "total_lines": sum(role.lines for role in mission.roles),
         "active_tasks": active_tasks,
         "source": mission.source,
+        "client_name": mission.client_name,
+        "client_tier": mission.client_tier,
+        "reputation_reward": mission.reputation_reward,
+        "deadline_day": mission.deadline_day,
+        "modifiers": list(mission.modifiers),
     }
 
 
@@ -539,6 +545,71 @@ def list_db_missions(
             "total_pages": total_pages,
             "has_prev": safe_page > 1,
             "has_next": safe_page < total_pages,
+        }
+
+
+def get_db_board_snapshot(
+    state: GameState,
+    database_url: Optional[str] = None,
+    sample_limit: int = 3,
+) -> Dict[str, object]:
+    with game_db_context(database_url):
+        statuses = ["NEW", "IN_PROGRESS", "READY", "COMPLETED"]
+        snapshot: Dict[str, object] = {"counts": {}, "items": {}}
+        for status in statuses:
+            snapshot["counts"][status] = count_db_movie_candidates(status=status)
+            snapshot["items"][status] = [
+                _build_candidate_info(movie, state)
+                for movie in list_db_movie_candidates(limit=sample_limit, status=status)
+            ]
+        snapshot["total"] = count_db_movie_candidates()
+        return snapshot
+
+
+def get_db_mission_detail(
+    state: GameState,
+    movie_code: str,
+    database_url: Optional[str] = None,
+) -> Optional[Dict[str, object]]:
+    with game_db_context(database_url):
+        movie = _get_movie_by_code(movie_code)
+        if movie is None:
+            return None
+        assignments = _load_assignments_for_movie(movie)
+        tasks = (
+            TranslationTask.query.filter(
+                or_(TranslationTask.movie_id == movie.id, TranslationTask.movie_code == movie.code)
+            )
+            .order_by(TranslationTask.created_at.desc(), TranslationTask.id.desc())
+            .all()
+        )
+        priority = _priority_from_text(
+            (tasks[0].priority_mode if tasks else None)
+            or next((a.priority_mode for a in assignments if a.priority_mode), None)
+        )
+        deadlines = [a.deadline_at for a in assignments if a.deadline_at] + [t.deadline_at for t in tasks if t.deadline_at]
+        mission = _build_mission_from_movie(state, movie, assignments, tasks, priority, deadlines)
+        return {
+            "code": mission.code,
+            "title": mission.title,
+            "year": mission.year,
+            "lang": mission.lang,
+            "priority": mission.priority,
+            "status": movie.status,
+            "reward": mission.reward,
+            "xp": mission.xp,
+            "deadline_day": mission.deadline_day,
+            "translator": mission.assigned_translator or "-",
+            "client_name": mission.client_name,
+            "client_tier": mission.client_tier,
+            "reputation_reward": mission.reputation_reward,
+            "modifiers": list(mission.modifiers),
+            "roles": [
+                {"role": role.role, "gender": role.gender, "lines": role.lines, "assigned": mission.assigned_roles.get(role.role) or "-"}
+                for role in mission.roles
+            ],
+            "active_tasks": sum(1 for task in tasks if (task.status or "").strip().upper() != "COMPLETED"),
+            "task_status": (tasks[0].status if tasks else None),
         }
 
 

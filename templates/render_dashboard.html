@@ -38,9 +38,18 @@
           <div class="section-title">Current mode</div>
           <div class="pill-row">
             <span class="pill">{{ service.mode }}</span>
-            <span class="pill">DB {{ 'ON' if service.game_use_db else 'OFF' }}</span>
+            <span class="pill">DB {{ 'READY' if service.web_db_ready else 'CHECK' }}</span>
             <span class="pill status-{{ service.status }}">{{ service.status|upper }}</span>
           </div>
+        </section>
+
+        <section>
+          <div class="section-title">Telegram refresh</div>
+          <ul class="plain-list muted compact-list">
+            <li>/menu dan /help untuk panel utama</li>
+            <li>/inventory, /gearshop, /equip untuk gear flow v13</li>
+            <li>/assignui, /board, /missions untuk mission control</li>
+          </ul>
         </section>
 
         <section>
@@ -53,13 +62,14 @@
     <main class="content">
       <section class="hero card">
         <div class="hero-copy">
-          <div class="eyebrow">Control Center</div>
-          <h2>Website + Telegram UI dah kemas, dan game loop v12 dah masuk.</h2>
-          <p class="muted">Halaman ini fokus pada webhook health, mission board, dan manifest fail yang masih dipakai. Sekarang gameplay pun ada training, rest, dan achievement board untuk progression jangka panjang.</p>
+          <div class="eyebrow">Control Center v13</div>
+          <h2>Mission board, DB health, Telegram webhook, dan game loop semua dalam satu panel.</h2>
+          <p class="muted">Versi ini betulkan error SQLAlchemy pada mission board, tambah mission detail preview, dan sambung progression game dengan gear, mission modifiers, dan inventory flow untuk Telegram.</p>
           <div class="pill-row wrap-row">
-            <span class="pill">Webhook path {{ service.webhook_path }}</span>
-            <span class="pill">External URL {{ service.render_external_url or 'missing' }}</span>
+            <span class="pill">Webhook {{ service.webhook_path }}</span>
+            <span class="pill">External {{ service.render_external_url or 'missing' }}</span>
             <span class="pill">Build {{ service.build_id }}</span>
+            <span class="pill {{ 'status-ok' if service.web_db_ready else 'status-error' }}">DB {{ 'READY' if service.web_db_ready else 'NOT READY' }}</span>
           </div>
         </div>
         <div class="hero-actions">
@@ -78,17 +88,37 @@
         <article class="card stat-card">
           <div class="stat-label">Pending updates</div>
           <div class="stat-value" id="pending-updates">{{ service.webhook_info.pending_update_count if service.webhook_info else 0 }}</div>
-          <div class="muted">Telegram queue waiting to be processed.</div>
+          <div class="muted">Queue Telegram untuk webhook semasa.</div>
         </article>
         <article class="card stat-card">
           <div class="stat-label">Webhook target</div>
           <div class="stat-value small" id="webhook-url">{{ service.webhook_info.url if service.webhook_info and service.webhook_info.url else (service.webhook_url or 'not set') }}</div>
-          <div class="muted">Make sure this matches Render public URL.</div>
+          <div class="muted">Pastikan URL ini sama dengan public URL Render.</div>
         </article>
         <article class="card stat-card">
-          <div class="stat-label">Startup error</div>
-          <div class="stat-value small {{ 'status-error' if service.start_error else 'status-ok' }}" id="start-error">{{ service.start_error or 'No startup error' }}</div>
-          <div class="muted">Kosong bermaksud service start clean.</div>
+          <div class="stat-label">DB board status</div>
+          <div class="stat-value small {{ 'status-ok' if service.web_db_ready else 'status-error' }}" id="db-status">{{ 'READY' if service.web_db_ready else (service.web_db_error or 'NOT READY') }}</div>
+          <div class="muted">Kalau mission board gagal, check DATABASE_URL dan init_app.</div>
+        </article>
+      </section>
+
+      <section class="substats-grid">
+        <article class="card compact-card">
+          <div class="section-title">Mission totals</div>
+          <div class="chip-row">
+            {% for key, value in (board.counts or {}).items() %}
+            <span class="chip">{{ key }} <strong>{{ value }}</strong></span>
+            {% endfor %}
+          </div>
+        </article>
+        <article class="card compact-card">
+          <div class="section-title">Gameplay v13</div>
+          <div class="chip-row">
+            <span class="chip">Inventory</span>
+            <span class="chip">Gear Shop</span>
+            <span class="chip">Equip Staff</span>
+            <span class="chip">Mission Modifiers</span>
+          </div>
         </article>
       </section>
 
@@ -98,9 +128,12 @@
             <div class="row space-between align-start gap-md wrap-row">
               <div>
                 <div class="section-title">Mission board</div>
-                <p class="muted">Tapis mission DB dari website. Untuk ambil mission dalam bot, guna <code>/pick CODE</code> atau button inline dalam Telegram.</p>
+                <p class="muted">Filter mission DB, klik row untuk preview detail, dan copy terus command <code>/pick CODE</code> untuk Telegram.</p>
               </div>
-              <a class="btn" href="{{ api_missions_path }}">Open JSON</a>
+              <div class="row gap-sm wrap-row">
+                <a class="btn" href="{{ api_missions_path }}">Open JSON</a>
+                <button class="btn" type="button" id="refresh-board-btn">Refresh board</button>
+              </div>
             </div>
 
             <form class="filters" method="get" action="{{ url_for('dashboard') }}">
@@ -134,6 +167,7 @@
                 <span>Page</span>
                 <input type="number" min="1" name="page" value="{{ filters.page }}">
               </label>
+              <input type="hidden" name="selected" value="{{ selected_code or '' }}">
               <div class="filter-actions">
                 <button class="btn btn-primary" type="submit">Apply</button>
                 <a class="btn" href="{{ url_for('dashboard') }}">Reset</a>
@@ -146,14 +180,8 @@
             </div>
             {% endif %}
 
-            <div class="chip-row">
-              {% for key, value in (board.counts or {}).items() %}
-              <span class="chip">{{ key }} <strong>{{ value }}</strong></span>
-              {% endfor %}
-            </div>
-
             <div class="table-wrap">
-              <table>
+              <table id="mission-table">
                 <thead>
                   <tr>
                     <th>Code</th>
@@ -168,7 +196,7 @@
                 </thead>
                 <tbody>
                   {% for item in board['items'] %}
-                  <tr>
+                  <tr class="mission-row {% if selected_code == item.code %}is-active{% endif %}" data-code="{{ item.code }}" data-detail-url="{{ api_mission_detail_base.replace('__CODE__', item.code) }}">
                     <td><code>{{ item.code }}</code></td>
                     <td>
                       <div class="cell-title">{{ item.title }}</div>
@@ -194,21 +222,104 @@
               <div class="muted">Page {{ board.page }} / {{ board.total_pages }} · Total {{ board.total }}</div>
               <div class="row gap-sm wrap-row">
                 {% if board.page > 1 %}
-                <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page-1) }}">Prev</a>
+                <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page-1, selected=selected_code) }}">Prev</a>
                 {% endif %}
                 {% if board.page < board.total_pages %}
-                <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page+1) }}">Next</a>
+                <a class="btn" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=board.page+1, selected=selected_code) }}">Next</a>
                 {% endif %}
               </div>
             </div>
           </article>
+
+          <article class="card">
+            <div class="section-title">Live status preview</div>
+            <pre id="status-json">Loading status…</pre>
+          </article>
         </div>
 
         <div class="stack gap-lg">
+          <article class="card detail-card" id="mission-detail-card">
+            <div class="row space-between gap-md wrap-row">
+              <div>
+                <div class="section-title">Mission detail</div>
+                <div class="detail-title" id="detail-title">{{ mission_detail.title if mission_detail else 'Select a mission' }}</div>
+                <div class="muted tiny" id="detail-code">{{ mission_detail.code if mission_detail else '-' }}</div>
+              </div>
+              {% if mission_detail %}
+              <a class="btn btn-primary" id="detail-pick-link" href="https://t.me">/pick {{ mission_detail.code }}</a>
+              {% else %}
+              <span class="btn disabled" id="detail-pick-link">/pick -</span>
+              {% endif %}
+            </div>
+
+            <div class="detail-grid">
+              <div class="detail-item"><span>Client</span><strong id="detail-client">{{ mission_detail.client_name if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Tier</span><strong id="detail-tier">{{ mission_detail.client_tier if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Status</span><strong id="detail-status">{{ mission_detail.status if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Priority</span><strong id="detail-priority">{{ mission_detail.priority if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Lang</span><strong id="detail-lang">{{ mission_detail.lang if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Translator</span><strong id="detail-translator">{{ mission_detail.translator if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>Reward</span><strong id="detail-reward">{{ mission_detail.reward if mission_detail else '-' }}</strong></div>
+              <div class="detail-item"><span>XP</span><strong id="detail-xp">{{ mission_detail.xp if mission_detail else '-' }}</strong></div>
+            </div>
+
+            <div class="detail-section">
+              <div class="section-title">Modifiers</div>
+              <div class="chip-row" id="detail-modifiers">
+                {% if mission_detail and mission_detail.modifiers %}
+                  {% for mod in mission_detail.modifiers %}
+                  <span class="chip">{{ mod }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">No modifiers</span>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="detail-section">
+              <div class="section-title">Role breakdown</div>
+              <div class="role-list" id="detail-roles">
+                {% if mission_detail and mission_detail.roles %}
+                  {% for role in mission_detail.roles %}
+                  <div class="role-item">
+                    <strong>{{ role.role }}</strong>
+                    <span>{{ role.gender }} · {{ role.lines }} lines</span>
+                    <em>{{ role.assigned }}</em>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="muted">No role data</div>
+                {% endif %}
+              </div>
+            </div>
+          </article>
+
           <article class="card">
-            <div class="section-title">Runtime manifest</div>
-            <p class="muted">Ini senarai fail yang masih dipakai dalam deploy semasa, dan group fail yang dibuang dari package.</p>
+            <div class="section-title">Mission snapshot</div>
             <div class="stack gap-md">
+              {% for status_name, items in (board.snapshot or {}).items() %}
+              <div class="snapshot-block">
+                <div class="snapshot-head">{{ status_name }}</div>
+                {% if items %}
+                  {% for item in items %}
+                  <a class="snapshot-link" href="{{ url_for('dashboard', status=filters.status, translator=filters.translator, priority=filters.priority, lang=filters.lang, page=filters.page, selected=item.code) }}">
+                    <strong>{{ item.code }}</strong>
+                    <span>{{ item.title }}</span>
+                    <em>{{ item.lang }} · {{ item.priority }}</em>
+                  </a>
+                  {% endfor %}
+                {% else %}
+                  <div class="muted tiny">No items</div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="section-title">Manifest</div>
+            <p class="muted">Deploy semasa tinggal fail runtime penting untuk webhook, dashboard, DB integration, dan game loop.</p>
+            <div class="stack gap-md mini-manifest">
               {% for group, files in manifest.kept.items() %}
               <div class="manifest-block">
                 <div class="manifest-title">Kept · {{ group }}</div>
@@ -219,42 +330,7 @@
                 </ul>
               </div>
               {% endfor %}
-
-              {% for group, files in manifest.removed.items() %}
-              <div class="manifest-block removed">
-                <div class="manifest-title">Removed · {{ group }}</div>
-                <ul>
-                  {% for file in files %}
-                  <li>{{ file }}</li>
-                  {% endfor %}
-                </ul>
-              </div>
-              {% endfor %}
             </div>
-          </article>
-
-          <article class="card">
-            <div class="section-title">Telegram UI refresh</div>
-            <ul class="plain-list muted">
-              <li>Tambah <code>/menu</code>, <code>/help</code>, dan <code>/goals</code></li>
-              <li>Menu inline sekarang ada <code>Goals</code> dan <code>Rest All</code></li>
-              <li>Staff management tambah <code>/staff</code>, <code>/train</code>, <code>/rest</code></li>
-              <li>Start screen tunjuk studio snapshot + jumlah goals unlock</li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <div class="section-title">Game loop v12</div>
-            <ul class="plain-list muted">
-              <li>Training loop untuk naikkan stat staff ikut fokus skill, speed, atau balanced</li>
-              <li>Rest loop untuk pulihkan energy dan turunkan burnout sebelum submit mission</li>
-              <li>Achievement / goals board bagi reward coins dan XP untuk progression jangka panjang</li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <div class="section-title">Live status preview</div>
-            <pre id="status-json">Loading status…</pre>
           </article>
         </div>
       </section>

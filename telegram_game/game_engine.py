@@ -92,6 +92,112 @@ TRAINING_FOCUS = {
     "speed": {"skill": 0, "speed": 2, "energy": 12, "burnout": 5},
 }
 
+MISSION_MODIFIERS = {
+    "rush_rewrite": {
+        "label": "Rush Rewrite",
+        "desc": "Script berubah saat akhir, translator kena laju.",
+        "reward": 18,
+        "xp": 6,
+        "translator_difficulty": 10,
+        "qa_threshold": 5,
+    },
+    "lip_sync_heavy": {
+        "label": "Lip-Sync Heavy",
+        "desc": "Timing ketat, VO perlu lebih tepat.",
+        "reward": 16,
+        "xp": 7,
+        "translator_difficulty": 4,
+        "qa_threshold": 6,
+    },
+    "ensemble_scene": {
+        "label": "Ensemble Scene",
+        "desc": "Banyak overlap dialog, cast kena seimbang.",
+        "reward": 14,
+        "xp": 5,
+        "translator_difficulty": 3,
+        "qa_threshold": 4,
+    },
+    "clean_audio": {
+        "label": "Clean Audio",
+        "desc": "Rakaman asal bersih, QA jadi sedikit mudah.",
+        "reward": 8,
+        "xp": 3,
+        "translator_difficulty": -2,
+        "qa_threshold": -3,
+    },
+    "premium_notes": {
+        "label": "Premium Notes",
+        "desc": "Client bagi arahan detail, reward naik tapi QA lebih cerewet.",
+        "reward": 20,
+        "xp": 8,
+        "translator_difficulty": 5,
+        "qa_threshold": 5,
+    },
+    "glossary_lock": {
+        "label": "Glossary Lock",
+        "desc": "Term kena ikut glossary ketat.",
+        "reward": 12,
+        "xp": 4,
+        "translator_difficulty": 7,
+        "qa_threshold": 2,
+    },
+}
+
+EQUIPMENT_CATALOG = {
+    "focus_notes": {
+        "label": "Focus Notes",
+        "desc": "Nota fokus untuk translator.",
+        "roles": ["translator"],
+        "cost": 42,
+        "skill": 5,
+        "speed": 1,
+        "translator_bonus": 5,
+    },
+    "glossary_pad": {
+        "label": "Glossary Pad",
+        "desc": "Pad istilah untuk bahasa campur.",
+        "roles": ["translator"],
+        "cost": 54,
+        "skill": 4,
+        "translator_bonus": 8,
+    },
+    "wave_mic": {
+        "label": "Wave Mic",
+        "desc": "Mic studio asas untuk VO.",
+        "roles": ["male", "female"],
+        "cost": 48,
+        "skill": 4,
+        "speed": 2,
+        "vo_bonus": 6,
+    },
+    "pop_filter": {
+        "label": "Pop Filter",
+        "desc": "Bantu take lebih bersih masa lip-sync susah.",
+        "roles": ["male", "female"],
+        "cost": 52,
+        "skill": 3,
+        "speed": 1,
+        "vo_bonus": 5,
+        "modifier_bonus": {"lip_sync_heavy": 6},
+    },
+    "rush_kit": {
+        "label": "Rush Kit",
+        "desc": "Kit kerja urgent untuk semua role.",
+        "roles": ["translator", "male", "female"],
+        "cost": 66,
+        "speed": 5,
+        "urgent_bonus": 8,
+    },
+    "calm_tea": {
+        "label": "Calm Tea",
+        "desc": "Kurangkan burnout sebelum sesi penting.",
+        "roles": ["translator", "male", "female"],
+        "cost": 38,
+        "burnout_relief": 10,
+        "premium_bonus": 3,
+    },
+}
+
 ACHIEVEMENT_ORDER = [
     "first_win",
     "team_builder",
@@ -126,6 +232,7 @@ class Staff:
     traits: List[str] = field(default_factory=list)
     burnout: int = 0
     training_sessions: int = 0
+    equipped: Optional[str] = None
 
     def power(self) -> float:
         rarity_bonus = RARITY_MULTIPLIER.get(self.rarity, 1.0)
@@ -160,6 +267,7 @@ class Mission:
     client_name: str = "Indie Spark"
     client_tier: str = "indie"
     reputation_reward: int = 1
+    modifiers: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -182,6 +290,8 @@ class GameState:
     achievements: List[str] = field(default_factory=list)
     total_trainings: int = 0
     total_rests: int = 0
+    inventory: Dict[str, int] = field(default_factory=dict)
+    total_chests: int = 0
 
     def level(self) -> int:
         return 1 + self.xp // 120
@@ -300,6 +410,60 @@ def _format_traits(member: Staff) -> str:
     return ", ".join(member.traits) if member.traits else "-"
 
 
+def _equipment_meta(item_key: Optional[str]) -> dict:
+    return EQUIPMENT_CATALOG.get((item_key or "").strip().lower(), {})
+
+
+def _equipment_label(item_key: Optional[str]) -> str:
+    meta = _equipment_meta(item_key)
+    return meta.get("label") or (item_key or "-")
+
+
+def _modifier_label(modifier: str) -> str:
+    return MISSION_MODIFIERS.get(modifier, {}).get("label", modifier)
+
+
+def _modifier_desc(modifier: str) -> str:
+    return MISSION_MODIFIERS.get(modifier, {}).get("desc", modifier)
+
+
+def _equipment_bonus(member: Staff, mission: Mission, role: Optional[RoleSlot] = None, translator: bool = False) -> float:
+    meta = _equipment_meta(member.equipped)
+    if not meta:
+        return 0.0
+    score = float(meta.get("skill", 0)) * 0.7 + float(meta.get("speed", 0)) * 0.55
+    if translator:
+        score += float(meta.get("translator_bonus", 0))
+    else:
+        score += float(meta.get("vo_bonus", 0))
+    if mission.priority in {"urgent", "superurgent"}:
+        score += float(meta.get("urgent_bonus", 0))
+    if mission.client_tier in {"premium", "enterprise"}:
+        score += float(meta.get("premium_bonus", 0))
+    if role is not None and role.lines >= 90:
+        score += float(meta.get("long_take_bonus", 0))
+    modifier_bonus = meta.get("modifier_bonus") or {}
+    for modifier in mission.modifiers:
+        score += float(modifier_bonus.get(modifier, 0))
+    if meta.get("burnout_relief"):
+        score += min(float(meta.get("burnout_relief", 0)) * 0.45, max(0.0, member.burnout * 0.18))
+    return score
+
+
+def _modifier_penalty(member: Staff, mission: Mission, translator: bool = False) -> float:
+    penalty = 0.0
+    modifier_set = set(mission.modifiers)
+    if translator and "rush_rewrite" in modifier_set:
+        penalty += max(0.0, 7.0 - member.speed * 0.04)
+    if translator and "glossary_lock" in modifier_set and "polyglot" not in member.traits:
+        penalty += 4.5
+    if not translator and "lip_sync_heavy" in modifier_set and "natural" not in member.traits:
+        penalty += 4.0
+    if "premium_notes" in modifier_set and "perfectionist" not in member.traits:
+        penalty += 2.5
+    return penalty
+
+
 def _trait_bonus(member: Staff, mission: Mission, role: Optional[RoleSlot] = None, translator: bool = False) -> float:
     traits = set(member.traits)
     bonus = 0.0
@@ -321,6 +485,10 @@ def _trait_bonus(member: Staff, mission: Mission, role: Optional[RoleSlot] = Non
         bonus += max(0.0, 6.0 - member.burnout * 0.08)
     if mission.client_tier in {"premium", "enterprise"} and "perfectionist" in traits:
         bonus += 3.0
+    if "rush_rewrite" in mission.modifiers and translator and "polyglot" in traits:
+        bonus += 4.0
+    if "ensemble_scene" in mission.modifiers and not translator and "charmer" in traits:
+        bonus += 3.5
     return bonus
 
 
@@ -354,6 +522,43 @@ def _remember_client(state: GameState, client_name: str) -> None:
     if client_name and client_name not in state.clients_seen:
         state.clients_seen.append(client_name)
         state.clients_seen.sort()
+
+
+def _pick_mission_modifiers(state: GameState, rnd: random.Random, priority: str, client_tier: str) -> List[str]:
+    pool = list(MISSION_MODIFIERS.keys())
+    weights = []
+    for key in pool:
+        weight = 10
+        if key == "rush_rewrite" and priority in {"urgent", "superurgent"}:
+            weight += 12
+        if key == "premium_notes" and client_tier in {"premium", "enterprise"}:
+            weight += 10
+        if key == "clean_audio":
+            weight += 6
+        if key == "ensemble_scene":
+            weight += 4
+        weights.append(weight)
+    count = 1 if rnd.random() < 0.72 else 2
+    picked: List[str] = []
+    for _ in range(count):
+        choice = rnd.choices(pool, weights=weights, k=1)[0]
+        if choice not in picked:
+            picked.append(choice)
+    return picked
+
+
+def _apply_modifier_package(mission: Mission) -> Mission:
+    for modifier in mission.modifiers:
+        meta = MISSION_MODIFIERS.get(modifier, {})
+        mission.reward += int(meta.get("reward", 0))
+        mission.xp += int(meta.get("xp", 0))
+        mission.translator_difficulty += int(meta.get("translator_difficulty", 0))
+        mission.qa_threshold += int(meta.get("qa_threshold", 0))
+    mission.reward = max(20, mission.reward)
+    mission.xp = max(10, mission.xp)
+    mission.translator_difficulty = max(10, mission.translator_difficulty)
+    mission.qa_threshold = max(20, mission.qa_threshold)
+    return mission
 
 
 def generate_market(state: GameState, seed: Optional[int] = None, count: Optional[int] = None) -> List[Staff]:
@@ -455,9 +660,16 @@ def refresh_market(state: GameState, seed: Optional[int] = None) -> List[Staff]:
 
 
 def new_game(user_id: int, studio_name: str = "Studio Baru") -> GameState:
-    state = GameState(user_id=user_id, studio_name=studio_name, roster=_make_default_roster(), reputation=10)
+    state = GameState(
+        user_id=user_id,
+        studio_name=studio_name,
+        roster=_make_default_roster(),
+        reputation=10,
+        inventory={"focus_notes": 1, "wave_mic": 1},
+    )
     refresh_market(state)
     state.log.append("Studio dibuka. Misi pertama menunggu.")
+    state.log.append("Starter gear diterima: Focus Notes dan Wave Mic.")
     return state
 
 
@@ -504,7 +716,9 @@ def generate_mission(state: GameState, seed: Optional[int] = None) -> Mission:
         client_name=client["name"],
         client_tier=client["tier"],
         reputation_reward=client["rep"],
+        modifiers=_pick_mission_modifiers(state, rnd, priority=priority, client_tier=client["tier"]),
     )
+    mission = _apply_modifier_package(mission)
     _remember_client(state, mission.client_name)
     return mission
 
@@ -606,8 +820,10 @@ def _translator_score(state: GameState, mission: Mission) -> float:
         + tr.level * 5
         + bonus
         + _trait_bonus(tr, mission, translator=True)
+        + _equipment_bonus(tr, mission, translator=True)
         - max(0, mission.translator_difficulty - tr.skill) * 0.4
         - _burnout_penalty(tr)
+        - _modifier_penalty(tr, mission, translator=True)
     )
 
 
@@ -630,7 +846,9 @@ def _vo_score(state: GameState, mission: Mission) -> float:
             + vo.level * 4
             + booth_bonus
             + _trait_bonus(vo, mission, role=role)
+            + _equipment_bonus(vo, mission, role=role)
             - _burnout_penalty(vo)
+            - _modifier_penalty(vo, mission, translator=False)
         ) / role_weight
     return total / len(mission.roles)
 
@@ -667,6 +885,40 @@ def _consume_energy(state: GameState, mission: Mission) -> None:
             member.burnout = max(0, member.burnout - (5 + state.upgrades.get("lounge", 0) * 2))
 
 
+def _grant_inventory_item(state: GameState, item_key: str, amount: int = 1) -> None:
+    if amount <= 0:
+        return
+    state.inventory[item_key] = int(state.inventory.get(item_key, 0)) + amount
+
+
+def _roll_chest_loot(state: GameState, mission: Mission, qa_score: float, passed: bool) -> List[str]:
+    if not passed:
+        return []
+    rnd = random.Random(state.user_id * 97 + state.day * 31 + state.wins * 13 + len(mission.code) + int(qa_score))
+    chest_chance = 0.35
+    if mission.client_tier in {"premium", "enterprise"}:
+        chest_chance += 0.12
+    if qa_score >= mission.qa_threshold + 12:
+        chest_chance += 0.10
+    if rnd.random() > chest_chance:
+        return []
+    pool = list(EQUIPMENT_CATALOG.keys())
+    weights = []
+    for key in pool:
+        weight = 12
+        if key in {"rush_kit", "glossary_pad"} and mission.priority in {"urgent", "superurgent"}:
+            weight += 6
+        if key == "pop_filter" and "lip_sync_heavy" in mission.modifiers:
+            weight += 8
+        if key == "calm_tea":
+            weight += 4
+        weights.append(weight)
+    item = rnd.choices(pool, weights=weights, k=1)[0]
+    _grant_inventory_item(state, item, 1)
+    state.total_chests += 1
+    return [item]
+
+
 def resolve_submission(state: GameState) -> Dict[str, object]:
     mission = ensure_mission(state)
     if not mission.accepted:
@@ -695,9 +947,11 @@ def resolve_submission(state: GameState) -> Dict[str, object]:
     state.losses += 0 if passed else 1
     _consume_energy(state, mission)
 
+    loot = _roll_chest_loot(state, mission, qa_score=qa_score, passed=passed)
     if passed:
+        loot_text = f" Loot: {', '.join(_equipment_label(item) for item in loot)}." if loot else ""
         state.log.append(
-            f"Misi {mission.code} lulus QA untuk {mission.client_name}. +{reward} coins, +{gained_xp} XP, rep {rep_change:+d}"
+            f"Misi {mission.code} lulus QA untuk {mission.client_name}. +{reward} coins, +{gained_xp} XP, rep {rep_change:+d}.{loot_text}"
         )
     else:
         state.log.append(
@@ -719,9 +973,84 @@ def resolve_submission(state: GameState) -> Dict[str, object]:
         "client_name": mission.client_name,
         "client_tier": mission.client_tier,
         "achievements": unlocked,
+        "loot": loot,
+        "modifiers": list(mission.modifiers),
     }
     state.current_mission = None
     return result
+
+
+def inventory_summary(state: GameState) -> str:
+    lines = [
+        f"🎒 Inventory — {state.studio_name}",
+        f"Coins {state.coins} | Total chests {state.total_chests}",
+    ]
+    if not state.inventory:
+        lines.append("- inventory kosong")
+        return "\n".join(lines)
+    for key, qty in sorted(state.inventory.items(), key=lambda item: (_equipment_meta(item[0]).get('cost', 0), item[0]), reverse=True):
+        if qty <= 0:
+            continue
+        meta = _equipment_meta(key)
+        lines.append(f"- {_equipment_label(key)} x{qty} | roles {', '.join(meta.get('roles', []))} | {meta.get('desc', '-')}")
+    return "\n".join(lines)
+
+
+def gear_shop_summary(state: GameState) -> str:
+    lines = [f"🧰 Gear shop — Coins {state.coins}"]
+    for key, meta in EQUIPMENT_CATALOG.items():
+        lines.append(f"- {meta['label']} ({key}) | cost {meta['cost']} | roles {', '.join(meta['roles'])} | {meta['desc']}")
+    return "\n".join(lines)
+
+
+def buy_gear(state: GameState, item_key: str) -> Dict[str, object]:
+    key = (item_key or '').strip().lower()
+    meta = _equipment_meta(key)
+    if not meta:
+        raise ValueError("Gear tak wujud.")
+    cost = int(meta.get('cost', 0))
+    if state.coins < cost:
+        raise ValueError(f"Coins tak cukup. Perlu {cost}.")
+    state.coins -= cost
+    _grant_inventory_item(state, key, 1)
+    state.log.append(f"Beli gear {_equipment_label(key)} dengan kos {cost}.")
+    return {"item_key": key, "label": _equipment_label(key), "cost": cost, "qty": state.inventory.get(key, 0)}
+
+
+def equip_gear(state: GameState, staff_name: str, item_key: str) -> Dict[str, object]:
+    member = find_staff(state, staff_name)
+    if not member:
+        raise ValueError("Staff tak wujud.")
+    key = (item_key or '').strip().lower()
+    meta = _equipment_meta(key)
+    if not meta:
+        raise ValueError("Gear tak wujud.")
+    if state.inventory.get(key, 0) <= 0:
+        raise ValueError("Item tu tak ada dalam inventory.")
+    if member.role_type not in set(meta.get('roles', [])):
+        raise ValueError("Gear tu tak sesuai untuk role staff ini.")
+    previous = member.equipped
+    if previous:
+        _grant_inventory_item(state, previous, 1)
+    member.equipped = key
+    state.inventory[key] = int(state.inventory.get(key, 0)) - 1
+    if state.inventory[key] <= 0:
+        state.inventory.pop(key, None)
+    state.log.append(f"{member.name} equip {_equipment_label(key)}.")
+    return {"member": member, "item_key": key, "label": _equipment_label(key), "previous": previous}
+
+
+def unequip_gear(state: GameState, staff_name: str) -> Dict[str, object]:
+    member = find_staff(state, staff_name)
+    if not member:
+        raise ValueError("Staff tak wujud.")
+    if not member.equipped:
+        raise ValueError("Staff ini belum equip gear.")
+    previous = member.equipped
+    member.equipped = None
+    _grant_inventory_item(state, previous, 1)
+    state.log.append(f"{member.name} unequip {_equipment_label(previous)}.")
+    return {"member": member, "item_key": previous, "label": _equipment_label(previous)}
 
 
 def hire_staff(state: GameState, staff_name: str) -> Staff:
@@ -1012,13 +1341,15 @@ def _staff_line(member: Staff, compact: bool = False) -> str:
     rarity_icon = RARITY_ICON.get(member.rarity, "⚪")
     traits = _format_traits(member)
     if compact:
+        gear = _equipment_label(member.equipped) if member.equipped else '-'
         return (
             f"{rarity_icon} {member.name}: power {round(member.power(), 1)}, energy {member.energy}, "
-            f"burnout {member.burnout}, lvl {member.level}, train {member.training_sessions}, traits {traits}"
+            f"burnout {member.burnout}, lvl {member.level}, gear {gear}, train {member.training_sessions}, traits {traits}"
         )
+    gear = _equipment_label(member.equipped) if member.equipped else '-'
     return (
         f"- {rarity_icon} {member.name}: skill {member.skill}, speed {member.speed}, energy {member.energy}, "
-        f"burnout {member.burnout}, lvl {member.level}, train {member.training_sessions}, rarity {member.rarity}, salary {member.salary}, traits {traits}"
+        f"burnout {member.burnout}, lvl {member.level}, gear {gear}, train {member.training_sessions}, rarity {member.rarity}, salary {member.salary}, traits {traits}"
     )
 
 
@@ -1045,6 +1376,7 @@ def current_team_summary(state: GameState) -> str:
         f"🎯 Team untuk mission {mission.code}",
         f"{mission.title}",
         f"Client: {mission.client_name} [{mission.client_tier}] | Rep +{mission.reputation_reward}",
+        f"Modifiers: {', '.join(_modifier_label(mod) for mod in mission.modifiers) if mission.modifiers else '-'}",
         "",
         f"Translator: {mission.assigned_translator or '-'}",
     ]
@@ -1132,6 +1464,7 @@ def mission_summary(mission: Mission) -> str:
         f"Client: {mission.client_name} [{mission.client_tier}]\n"
         f"Lang: {mission.lang.upper()} | Priority: {mission.priority} | Deadline day: {mission.deadline_day}\n"
         f"Reward: {mission.reward} coins | XP: {mission.xp} | Rep: {mission.reputation_reward}\n"
+        f"Modifiers: {', '.join(_modifier_label(mod) for mod in mission.modifiers) if mission.modifiers else "-"}\n"
         f"Source: {mission.source}\n\n"
         f"Roles:\n{roles}\n\n"
         f"Assignments:\n" + "\n".join(assigned)
@@ -1218,6 +1551,7 @@ def staff_detail_summary(state: GameState, staff_name: str) -> str:
         f"Skill {member.skill} | Speed {member.speed} | Level {member.level}\n"
         f"Energy {member.energy} | Burnout {member.burnout} | Train sessions {member.training_sessions}\n"
         f"Salary/day {member.salary} | Assigned now: {'yes' if assigned else 'no'}\n"
+        f"Equipped: {_equipment_label(member.equipped) if member.equipped else '-'}\n"
         f"Traits: {_format_traits(member)}\n"
         f"Train cost: {_training_cost(member, 'balanced')} | Rest cost: {_rest_cost(member)}"
     )
@@ -1297,6 +1631,8 @@ def load_state(path: Path) -> Optional[GameState]:
         achievements=data.get("achievements", []),
         total_trainings=data.get("total_trainings", 0),
         total_rests=data.get("total_rests", 0),
+        inventory=data.get("inventory", {}) or {},
+        total_chests=data.get("total_chests", 0),
     )
     if state.current_mission is not None:
         _remember_client(state, state.current_mission.client_name)

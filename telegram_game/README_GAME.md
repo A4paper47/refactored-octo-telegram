@@ -1,13 +1,16 @@
-# Telegram UI Notes — v12 Gameplay Loop
+# Telegram UI Notes — v13 Inventory + Gear Loop
 
 ## Main improvements
 
-- added `/goals` for achievement and milestone tracking
-- added `/staff <name>` for detailed staff card
-- added `/train <name> [balanced|skill|speed]`
-- added `/rest <name>` and `/restall`
-- home panel now shows unlocked goals count
-- inline menu now includes **Goals** and **Rest All**
+- added `/inventory`
+- added `/gearshop`
+- added `/buygear <item_key>`
+- added `/equip <staff> <item_key>`
+- added `/unequip <staff>`
+- mission cards now show **modifiers**
+- submit result can now give loot items into inventory
+- home panel now shows inventory count
+- inline menu now includes **Inventory** and **Gear Shop**
 
 ## Recommended flow
 
@@ -16,11 +19,12 @@
 /menu
 /mission
 /accept
-/assignui
+/autocast
+/inventory
+/gearshop
+/buygear focus_notes
+/equip Alya focus_notes
 /team
-/goals
-/train Ray speed
-/rest Sara
 /submit
 /nextday
 ```
@@ -32,6 +36,6 @@
 - Accept / Auto Cast / Submit
 - Studio / Market / Clients
 - Roster / Bench / Goals
-- Rep / Rest All / Log
-- Sync DB / DB Mission / Help
-- Next Day
+- Inventory / Gear Shop / Rep
+- Rest All / Log / Help
+- Sync DB / DB Mission / Next Day

@@ -12,6 +12,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from telegram_game.db_integration import (
     auto_cast_db_mission,
     count_db_movie_candidates,
+    get_db_board_snapshot,
     list_db_missions,
     load_db_mission_into_state,
     load_specific_db_mission_into_state,
@@ -30,6 +31,7 @@ from telegram_game.game_engine import (
     clear_assignments,
     current_team_summary,
     ensure_mission,
+    equip_gear,
     fire_staff,
     hire_staff,
     latest_log,
@@ -51,6 +53,10 @@ from telegram_game.game_engine import (
     train_staff,
     upgrade_studio,
     goals_summary,
+    gear_shop_summary,
+    inventory_summary,
+    buy_gear,
+    unequip_gear,
 )
 
 log = logging.getLogger(__name__)
@@ -130,9 +136,9 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🏢 Studio", callback_data="g|studio"), InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🤝 Clients", callback_data="g|clients")],
         [InlineKeyboardButton("👤 Roster", callback_data="g|roster"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("🏆 Goals", callback_data="g|goals")],
-        [InlineKeyboardButton("⭐ Rep", callback_data="g|reputation"), InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("📜 Log", callback_data="g|log")],
-        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
-        [InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
+        [InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"), InlineKeyboardButton("🧰 Gear Shop", callback_data="g|gearshop"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
+        [InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
+        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
 
 
@@ -159,6 +165,9 @@ Main commands:
 /rest <nama> /restall — recover energy & burnout
 /goals — achievement dan milestone
 /market /hire /fire — recruitment
+/inventory /gearshop — inventory dan shop
+/buygear <item_key> — beli gear
+/equip <staff> <item_key> /unequip <staff> — pasang gear staff
 /studio /clients /reputation — studio panel
 /syncdb /dbmission — DB sync tools
 /log /nextday — progression"""
@@ -174,11 +183,12 @@ def _home_text(state) -> str:
         f"Studio: {state.studio_name}",
         f"Mode: {_mode_label()}",
         f"Day {state.day} | Coins {state.coins} | XP {state.xp} | Level {state.level()} | Rep {state.reputation}",
-        f"Roster: {translator_count} translator · {vo_count} VO | Market {len(state.market)} | Goals {len(state.achievements)}",
+        f"Roster: {translator_count} translator · {vo_count} VO | Market {len(state.market)} | Goals {len(state.achievements)} | Inv {sum(state.inventory.values())}",
         "",
         "Current mission",
         f"- {mission.code} | {mission.title}",
         f"- Client {mission.client_name} [{mission.client_tier}] | {mission.lang.upper()} | {mission.priority}",
+        f"- Modifiers: {', '.join(mission.modifiers) if mission.modifiers else '-'}",
         f"- Translator: {mission.assigned_translator or '-'}",
         f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
         "",
@@ -392,12 +402,13 @@ def _board_text(state) -> str:
         mission = _ensure_bot_mission(state)
         return "🗂️ Mission board (demo mode)" + chr(10) + chr(10) + mission_summary(mission)
     chunks = ["🗂️ Mission board snapshot", "Guna /missions untuk list penuh atau tap filter button bawah."]
+    try:
+        snapshot = get_db_board_snapshot(state, sample_limit=3)
+    except Exception as exc:
+        return f"❌ Tak dapat load board DB: {exc}"
     for status in ["NEW", "IN_PROGRESS", "READY", "COMPLETED"]:
-        try:
-            total = count_db_movie_candidates(status=status)
-            items = list_db_missions(state, limit=3, status=status)
-        except Exception as exc:
-            return f"❌ Tak dapat load board DB: {exc}"
+        total = snapshot.get("counts", {}).get(status, 0)
+        items = snapshot.get("items", {}).get(status, [])
         chunks.append("")
         chunks.append(f"{status} ({total})")
         if not items:
@@ -1015,6 +1026,66 @@ async def cmd_restall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.effective_message.reply_text(text, reply_markup=_menu())
 
 
+async def cmd_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(inventory_summary(state), reply_markup=_menu())
+
+
+async def cmd_gearshop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(gear_shop_summary(state), reply_markup=_menu())
+
+
+async def cmd_buygear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    item_key = " ".join(context.args).strip()
+    if not item_key:
+        text = "Usage: /buygear <item_key>"
+    else:
+        try:
+            info = buy_gear(state, item_key)
+            text = f"🧰 Gear dibeli: {info['label']}\nCost: {info['cost']}\nQty sekarang: {info['qty']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_equip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    if len(context.args) < 2:
+        text = "Usage: /equip <nama staff> <item_key>"
+    else:
+        staff_name = " ".join(context.args[:-1]).strip()
+        item_key = context.args[-1].strip()
+        try:
+            info = equip_gear(state, staff_name, item_key)
+            text = f"🎯 {info['member'].name} equip {info['label']}"
+            if info.get('previous'):
+                text += f"\nPrevious returned to inventory: {info['previous']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
+async def cmd_unequip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    staff_name = " ".join(context.args).strip()
+    if not staff_name:
+        text = "Usage: /unequip <nama staff>"
+    else:
+        try:
+            info = unequip_gear(state, staff_name)
+            text = f"🎒 {info['member'].name} unequip {info['label']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=_menu())
+
+
 async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _save(state)
@@ -1138,6 +1209,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "clients": cmd_clients,
         "reputation": cmd_reputation,
         "goals": cmd_goals,
+        "inventory": cmd_inventory,
+        "gearshop": cmd_gearshop,
         "restall": cmd_restall,
         "log": cmd_log,
         "nextday": cmd_nextday,
@@ -1182,6 +1255,11 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("train", cmd_train))
     app.add_handler(CommandHandler("rest", cmd_rest))
     app.add_handler(CommandHandler("restall", cmd_restall))
+    app.add_handler(CommandHandler("inventory", cmd_inventory))
+    app.add_handler(CommandHandler("gearshop", cmd_gearshop))
+    app.add_handler(CommandHandler("buygear", cmd_buygear))
+    app.add_handler(CommandHandler("equip", cmd_equip))
+    app.add_handler(CommandHandler("unequip", cmd_unequip))
     app.add_handler(CommandHandler("studio", cmd_studio))
     app.add_handler(CommandHandler("clients", cmd_clients))
     app.add_handler(CommandHandler("reputation", cmd_reputation))

@@ -10,7 +10,8 @@ from typing import Any, Optional
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 from telegram import Update
 
-from telegram_game.db_integration import count_db_movie_candidates, list_db_missions
+from db import init_db
+from telegram_game.db_integration import count_db_movie_candidates, list_db_missions, get_db_board_snapshot, get_db_mission_detail
 from telegram_game.game_engine import new_game
 from telegram_game.telegram_studio_game_bot import build_game_application
 from version import APP_VERSION, BUILD_ID
@@ -27,6 +28,7 @@ TELEGRAM_SECRET_TOKEN = (os.getenv("TELEGRAM_SECRET_TOKEN") or WEBHOOK_SECRET).s
 BOT_AUTO_START = os.getenv("BOT_AUTO_START", "1").strip() not in ("0", "false", "False", "")
 BOT_ENABLED = bool(BOT_TOKEN)
 GAME_USE_DB = os.getenv("GAME_USE_DB", "1").strip() not in ("0", "false", "False", "")
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
 
 RUNTIME_FILE_GROUPS = {
     "core": [
@@ -89,6 +91,18 @@ REMOVED_FILE_GROUPS = {
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
+
+WEB_DB_READY = False
+WEB_DB_ERROR: Optional[str] = None
+if GAME_USE_DB and DATABASE_URL:
+    try:
+        init_db(app)
+        WEB_DB_READY = True
+    except Exception as exc:  # pragma: no cover
+        WEB_DB_ERROR = str(exc)
+        log.warning("Render web DB init failed: %s", exc)
+elif GAME_USE_DB and not DATABASE_URL:
+    WEB_DB_ERROR = "Missing DATABASE_URL"
 
 _game_app = None
 _bot_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -274,6 +288,8 @@ def _service_snapshot() -> dict[str, Any]:
         "start_error": _bot_start_error,
         "app_version": APP_VERSION,
         "build_id": BUILD_ID,
+        "web_db_ready": WEB_DB_READY,
+        "web_db_error": WEB_DB_ERROR,
     }
     if BOT_ENABLED and _bot_started:
         try:
@@ -301,6 +317,26 @@ def _dashboard_filters() -> dict[str, Any]:
     }
 
 
+def _selected_code() -> Optional[str]:
+    code = (request.args.get("selected") or "").strip()
+    return code or None
+
+
+def _dashboard_detail(board: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
+    if not GAME_USE_DB or not DATABASE_URL:
+        return None
+    selected = _selected_code()
+    if not selected and board and board.get("items"):
+        selected = board["items"][0].get("code")
+    if not selected:
+        return None
+    try:
+        state = new_game(user_id=0, studio_name="Render Dashboard")
+        return get_db_mission_detail(state, selected)
+    except Exception:
+        return None
+
+
 def _manifest_payload() -> dict[str, Any]:
     total_kept = sum(len(items) for items in RUNTIME_FILE_GROUPS.values())
     total_removed = sum(len(items) for items in REMOVED_FILE_GROUPS.values())
@@ -321,7 +357,18 @@ def _dashboard_board() -> dict[str, Any]:
             "total_pages": 1,
             "total": 0,
             "counts": {},
+            "snapshot": {},
             "error": "GAME_USE_DB=0, mission board DB dimatikan.",
+        }
+    if not DATABASE_URL:
+        return {
+            "items": [],
+            "page": 1,
+            "total_pages": 1,
+            "total": 0,
+            "counts": {},
+            "snapshot": {},
+            "error": "Missing DATABASE_URL untuk mission board.",
         }
     try:
         state = new_game(user_id=0, studio_name="Render Dashboard")
@@ -335,12 +382,9 @@ def _dashboard_board() -> dict[str, Any]:
             page=filters["page"],
             include_meta=True,
         )
-        payload["counts"] = {
-            "NEW": count_db_movie_candidates(status="NEW"),
-            "IN_PROGRESS": count_db_movie_candidates(status="IN_PROGRESS"),
-            "READY": count_db_movie_candidates(status="READY"),
-            "COMPLETED": count_db_movie_candidates(status="COMPLETED"),
-        }
+        snapshot = get_db_board_snapshot(state, sample_limit=3)
+        payload["counts"] = snapshot.get("counts", {})
+        payload["snapshot"] = snapshot.get("items", {})
         payload["error"] = None
         return payload
     except Exception as exc:
@@ -350,6 +394,7 @@ def _dashboard_board() -> dict[str, Any]:
             "total_pages": 1,
             "total": 0,
             "counts": {},
+            "snapshot": {},
             "error": str(exc),
         }
 
@@ -362,18 +407,23 @@ def index():
 @app.route("/dashboard")
 @app.route("/dashboard/")
 def dashboard():
+    board = _dashboard_board()
+    detail = _dashboard_detail(board=board)
     return render_template(
         "render_dashboard.html",
         service=_service_snapshot(),
-        board=_dashboard_board(),
+        board=board,
         filters=_dashboard_filters(),
         manifest=_manifest_payload(),
+        selected_code=_selected_code(),
+        mission_detail=detail,
         setup_path=url_for("setup_webhook_route"),
         webhook_info_path=url_for("webhook_info_route"),
         delete_webhook_path=url_for("delete_webhook_route"),
         api_status_path=url_for("api_status"),
         api_missions_path=url_for("api_missions"),
         api_manifest_path=url_for("api_manifest"),
+        api_mission_detail_base=url_for("api_mission_detail", movie_code="__CODE__"),
         health_path=url_for("health"),
     )
 
@@ -395,6 +445,19 @@ def api_manifest():
     return jsonify(_manifest_payload())
 
 
+@app.route("/api/mission/<movie_code>")
+def api_mission_detail(movie_code: str):
+    if not GAME_USE_DB:
+        return jsonify({"ok": False, "message": "GAME_USE_DB=0"}), 400
+    if not DATABASE_URL:
+        return jsonify({"ok": False, "message": "Missing DATABASE_URL"}), 400
+    state = new_game(user_id=0, studio_name="Render Dashboard")
+    detail = get_db_mission_detail(state, movie_code)
+    if detail is None:
+        return jsonify({"ok": False, "message": "Mission not found"}), 404
+    return jsonify({"ok": True, "detail": detail})
+
+
 @app.route("/health")
 def health():
     payload = {
@@ -405,6 +468,8 @@ def health():
         "start_error": _bot_start_error,
         "app_version": APP_VERSION,
         "build_id": BUILD_ID,
+        "web_db_ready": WEB_DB_READY,
+        "web_db_error": WEB_DB_ERROR,
     }
     status = 200 if (not BOT_ENABLED or _bot_started) else 503
     return jsonify(payload), status
