@@ -1376,7 +1376,7 @@ def current_team_summary(state: GameState) -> str:
         f"🎯 Team untuk mission {mission.code}",
         f"{mission.title}",
         f"Client: {mission.client_name} [{mission.client_tier}] | Rep +{mission.reputation_reward}",
-        f"Modifiers: {', '.join(_modifier_label(mod) for mod in mission.modifiers) if mission.modifiers else '-'}",
+        f"Modifiers: {', '.join(_modifier_label(mod) for mod in mission.modifiers) if mission.modifiers else '-'}\n"
         "",
         f"Translator: {mission.assigned_translator or '-'}",
     ]
@@ -1464,7 +1464,7 @@ def mission_summary(mission: Mission) -> str:
         f"Client: {mission.client_name} [{mission.client_tier}]\n"
         f"Lang: {mission.lang.upper()} | Priority: {mission.priority} | Deadline day: {mission.deadline_day}\n"
         f"Reward: {mission.reward} coins | XP: {mission.xp} | Rep: {mission.reputation_reward}\n"
-        f"Modifiers: {', '.join(_modifier_label(mod) for mod in mission.modifiers) if mission.modifiers else "-"}\n"
+        f"Modifiers: {', '.join(_modifier_label(mod) for mod in mission.modifiers) if mission.modifiers else '-'}\n"
         f"Source: {mission.source}\n\n"
         f"Roles:\n{roles}\n\n"
         f"Assignments:\n" + "\n".join(assigned)
