@@ -433,7 +433,25 @@ def _mission_simulator_payload(detail: Optional[dict[str, Any]]) -> dict[str, An
     if not warnings:
         warnings.append("Balanced mission — operator can bias speed or polish depending on current studio condition.")
 
-    workflow_text = "\n".join([f"/pick {code}", "/accept", f"/assignpreset {preset}", "/team", "/submit"])
+    recommended_commands = [f"/pick {code}", "/accept", f"/assignpreset {preset}", "/team", "/submit"]
+    workflow_text = "\n".join(recommended_commands)
+    operator_summary = (
+        f"Bias the run toward {preset} handling first. "
+        f"Urgency {urgency}/100, polish {polish}/100, staffing load {staffing}/100."
+    )
+    action_deck = [
+        {"label": "Copy recommended preset", "command": f"/assignpreset {preset}", "tone": "primary"},
+        {"label": "Copy full recommended flow", "command": workflow_text, "tone": "default"},
+        {"label": "Open assign UI", "command": "/assignui", "tone": "default"},
+        {"label": "Review team", "command": "/team", "tone": "default"},
+        {"label": "Submit QA", "command": "/submit", "tone": "default"},
+    ]
+    preset_deck = [
+        {"key": "recommended", "label": "Recommended", "command": f"/assignpreset {preset}", "active": True, "is_recommended": True},
+        {"key": "lang", "label": "Language safe", "command": "/assignpreset lang", "active": preset == "lang", "is_recommended": preset == "lang"},
+        {"key": "workload", "label": "Workload safe", "command": "/assignpreset workload", "active": preset == "workload", "is_recommended": preset == "workload"},
+        {"key": "trait", "label": "Trait polish", "command": "/assignpreset trait", "active": preset == "trait", "is_recommended": preset == "trait"},
+    ]
     return {
         "code": code,
         "preset": preset,
@@ -443,8 +461,11 @@ def _mission_simulator_payload(detail: Optional[dict[str, Any]]) -> dict[str, An
         "translator_focus": translator_focus,
         "vo_focus": vo_focus,
         "warnings": warnings,
-        "recommended_commands": [f"/pick {code}", "/accept", f"/assignpreset {preset}", "/team", "/submit"],
+        "operator_summary": operator_summary,
+        "recommended_commands": recommended_commands,
         "workflow_text": workflow_text,
+        "action_deck": action_deck,
+        "preset_deck": preset_deck,
     }
 
 

@@ -1,17 +1,18 @@
-# Telegram UI Notes — v19 Simulator + Assign Presets
+# Telegram UI Notes — v20 Live Simulator Actions + Preset Buttons
 
-## New in v19
+## New in v20
 
-- `/assignpreset <recommended|lang|workload|trait>` auto-fills translator and role picks using a smart preset
-- `/assignui` now shows and preserves an active preset across:
-  - translator filters
-  - role filters
-  - role picker pages
-- role picker and assign UI now surface the active preset in text for faster operator testing
-- website dashboard now includes:
-  - mission simulator panel
-  - recommended preset playbook
-  - copy-ready preset workflow
+- mission flow now includes direct preset apply buttons on selected mission cards
+  - `recommended`
+  - `lang`
+  - `workload`
+  - `trait`
+- `/accept` now keeps you inside the mission flow instead of dropping back to the generic menu
+- dashboard simulator now includes:
+  - simulator action deck
+  - preset action deck
+  - operator summary card
+  - copy-ready recommended preset actions
 
 ## Suggested flow
 
@@ -19,7 +20,7 @@
 /start
 /missionsui
 /accept
-/assignpreset recommended
+[tap a preset button]
 /team
 /submit
 ```
@@ -28,6 +29,7 @@
 
 ```text
 /assignui
+/assignpreset recommended
 /assignpreset lang
 /assignpreset workload
 /assignpreset trait

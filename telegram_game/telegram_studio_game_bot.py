@@ -163,6 +163,7 @@ Core controls:
 /board — board snapshot
 /assignui — assign with buttons
 /assignpreset <recommended|lang|workload|trait> — smart auto-fill using a preset
+Preset buttons are also available directly inside the mission flow and selected mission cards
 /team /bench /roster — staff overview
 /rosterui [page] — paged staff browser
 /staff <name> — staff profile
@@ -197,7 +198,7 @@ def _home_text(state) -> str:
         f"- Translator: {mission.assigned_translator or '-'}",
         f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
         "",
-        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /missionsui for paged mission picking, /rosterui for paged staff browsing, and /assignpreset recommended for one-tap smart casting.",
+        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /missionsui for paged mission picking, /rosterui for paged staff browsing, and the preset buttons on each mission card for one-tap smart casting.",
     ]
     return chr(10).join(lines)
 
@@ -560,9 +561,10 @@ def _all_role_candidates(state, role_name: str, energy_filter: str = "all", pres
 
 def _selected_mission_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui")],
-        [InlineKeyboardButton("🪄 Preset", callback_data="g|assignpreset|recommended"), InlineKeyboardButton("👥 Team", callback_data="g|team")],
-        [InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
+        [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast")],
+        [InlineKeyboardButton("🪄 Rec", callback_data="g|presetapply|recommended"), InlineKeyboardButton("🌐 Lang", callback_data="g|presetapply|lang")],
+        [InlineKeyboardButton("⚙️ Load", callback_data="g|presetapply|workload"), InlineKeyboardButton("✨ Trait", callback_data="g|presetapply|trait")],
+        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1"), InlineKeyboardButton("🏠 Menu", callback_data="g|menu")],
     ])
 
@@ -1262,33 +1264,40 @@ async def cmd_assignui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def cmd_assignpreset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    state = _load_or_create(update.effective_user.id)
+def _apply_assign_preset(state, requested: str, actor_name: str) -> tuple[str, str]:
     mission = _ensure_bot_mission(state)
-    requested = (context.args[0] if getattr(context, "args", None) else "recommended")
     preset = _effective_assign_preset(state, requested)
     picks: dict[str, str] = {}
+    translators = _safe_all_translator_candidates(state, preset=preset)
+    if translators:
+        picks["translator"] = assign_translator(state, translators[0].name)
+    for role in mission.roles:
+        candidates = _safe_all_role_candidates(state, role.role, energy_filter="all", preset=preset)
+        if candidates:
+            picks[role.role] = assign_role(state, role.role, candidates[0].name)
+    db_info = _persist_assignments_if_db(state, actor_name=actor_name)
+    lines = [f"🧠 Assign preset applied: {_preset_caption(state, requested)}"]
+    for key, value in picks.items():
+        lines.append(f"- {key}: {value}")
+    if not picks:
+        lines.append("- No suitable staff available")
+    if db_info:
+        lines.append(f"DB synced: task #{db_info['translation_task_id']} · assignments +{db_info['assignment_created']}")
+    lines.append("")
+    lines.append("Use Team or Submit next, or tap another preset to re-balance the roster.")
+    return "\n".join(lines), preset
+
+
+async def cmd_assignpreset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    requested = (context.args[0] if getattr(context, "args", None) else "recommended")
     try:
-        translators = _safe_all_translator_candidates(state, preset=preset)
-        if translators:
-            picks["translator"] = assign_translator(state, translators[0].name)
-        for role in mission.roles:
-            candidates = _safe_all_role_candidates(state, role.role, energy_filter="all", preset=preset)
-            if candidates:
-                picks[role.role] = assign_role(state, role.role, candidates[0].name)
-        db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
-        lines = [f"🧠 Assign preset applied: {_preset_caption(state, requested)}"]
-        for key, value in picks.items():
-            lines.append(f"- {key}: {value}")
-        if not picks:
-            lines.append("- No suitable staff available")
-        if db_info:
-            lines.append(f"DB synced: task #{db_info['translation_task_id']} · assignments +{db_info['assignment_created']}")
-        text = "\n".join(lines)
+        text, preset = _apply_assign_preset(state, requested, actor_name=update.effective_user.first_name or "player")
     except Exception as exc:
+        preset = requested
         text = f"❌ Assign preset gagal: {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state, preset=requested))
+    await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state, preset=preset))
 
 
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1332,7 +1341,7 @@ async def cmd_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     _ensure_bot_mission(state)
     mission = accept_mission(state)
     _save(state)
-    await update.effective_message.reply_text(f"✅ Misi diterima!\n\n{mission_summary(mission)}", reply_markup=_menu())
+    await update.effective_message.reply_text(f"✅ Misi diterima!\n\n{mission_summary(mission)}", reply_markup=_selected_mission_keyboard())
 
 
 async def cmd_autocast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1815,30 +1824,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state))
         return
 
+    if len(parts) >= 3 and parts[1] == "presetapply":
+        state = _load_or_create(update.effective_user.id)
+        requested = parts[2].strip() or "recommended"
+        try:
+            text, preset = _apply_assign_preset(state, requested, actor_name=update.effective_user.first_name or "player")
+        except Exception as exc:
+            preset = requested
+            text = f"❌ Assign preset gagal: {exc}"
+        _save(state)
+        await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state, preset=preset))
+        return
+
     if len(parts) >= 3 and parts[1] == "assignpreset":
         state = _load_or_create(update.effective_user.id)
         _ensure_bot_mission(state)
-        requested = parts[2]
-        preset = _effective_assign_preset(state, requested)
-        picks: dict[str, str] = {}
-        try:
-            translators = _safe_all_translator_candidates(state, preset=preset)
-            if translators:
-                picks["translator"] = assign_translator(state, translators[0].name)
-            for role in state.current_mission.roles:
-                candidates = _safe_all_role_candidates(state, role.role, energy_filter="all", preset=preset)
-                if candidates:
-                    picks[role.role] = assign_role(state, role.role, candidates[0].name)
-            db_info = _persist_assignments_if_db(state, actor_name=update.effective_user.first_name or "player")
-            text = "\n".join([f"🧠 Assign preset applied: {_preset_caption(state, requested)}", *[f"- {k}: {v}" for k, v in picks.items()]])
-            if not picks:
-                text += "\n- No suitable staff available"
-            if db_info:
-                text += f"\nDB synced: task #{db_info['translation_task_id']} · assignments +{db_info['assignment_created']}"
-        except Exception as exc:
-            text = f"❌ Assign preset gagal: {exc}"
+        preset = parts[2].strip() or "recommended"
         _save(state)
-        await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state, preset=requested))
+        await update.effective_message.reply_text(
+            _assign_ui_text(state, tr_page=1, role_page=1, tr_filter="all", role_gender="all", preset=preset),
+            reply_markup=_assign_ui_keyboard(state, tr_page=1, role_page=1, tr_filter="all", role_gender="all", preset=preset),
+        )
         return
 
     if len(parts) >= 2 and parts[1] == "gearshopui":

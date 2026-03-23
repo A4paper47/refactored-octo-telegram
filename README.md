@@ -1,22 +1,22 @@
-# Studio Dub Tycoon — Render Web Service Edition (v19)
+# Studio Dub Tycoon — Render Web Service Edition (v20)
 
 This package continues the cleaned Render Web Service build and extends both the dashboard and Telegram gameplay UI.
 
-## What changed in v19
+## What changed in v20
 
-- added **mission simulator** panel on the dashboard
-  - recommended assign preset
-  - operator playbook notes
-  - quick copy sequence
-  - API route for simulation payloads
-- upgraded Telegram assignment flow with **smart presets**
+- added **live simulator action decks** on the website dashboard
+  - copy-ready recommended preset action
+  - full recommended workflow copy
+  - assign/team/submit quick actions
+  - preset action deck for recommended, language-safe, workload-safe, and trait-polish flows
+  - operator summary card tied to the selected mission
+- upgraded Telegram mission flow with **one-tap preset apply buttons**
+  - `recommended`
   - `lang`
   - `workload`
   - `trait`
-  - `recommended`
-- added `/assignpreset <recommended|lang|workload|trait>` command
-- assign UI and role picker now preserve the active preset across pagination and filters
-- refreshed dashboard copy and build id to `20260323-v19-simulator-presets-ui`
+- `/accept`, `/mission`, and selected mission cards now surface preset buttons directly
+- refreshed dashboard copy and build id to `20260323-v20-live-sim-actions`
 
 ## Deploy
 

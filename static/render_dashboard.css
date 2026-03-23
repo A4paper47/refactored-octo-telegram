@@ -200,7 +200,9 @@ h3 { font-size: 18px; }
 .pill-row,
 .chip-row,
 .command-grid,
-.nav-list {
+.nav-list,
+.sim-action-deck,
+.sim-preset-deck {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -856,4 +858,14 @@ pre {
 
 .no-pad {
   padding: 0;
+}
+
+
+.sim-operator-summary-card strong {
+  line-height: 1.55;
+}
+
+.sim-action-deck .btn,
+.sim-preset-deck .btn {
+  min-height: 42px;
 }

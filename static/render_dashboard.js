@@ -148,6 +148,30 @@ function renderRoleList(detail, targetId) {
   });
 }
 
+function renderCommandDeck(targetId, items) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.innerHTML = "";
+  const deck = Array.isArray(items) ? items : [];
+  if (!deck.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No simulator actions available.";
+    target.appendChild(empty);
+    return;
+  }
+
+  deck.forEach((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `btn copy-command-btn${item?.tone === "primary" || item?.active ? " btn-primary" : ""}`;
+    button.dataset.command = item?.command || "";
+    button.textContent = item?.label || item?.command || "Copy";
+    target.appendChild(button);
+  });
+  bindCopyButtons();
+}
+
 function renderMissionModal(detail) {
   const title = document.getElementById("mission-modal-title");
   const code = document.getElementById("mission-modal-code");
@@ -191,6 +215,7 @@ function renderMissionSimulation(simulation) {
   const staffing = document.getElementById("sim-staffing");
   const trFocus = document.getElementById("sim-translator-focus");
   const voFocus = document.getElementById("sim-vo-focus");
+  const operatorSummary = document.getElementById("sim-operator-summary");
   const warnList = document.getElementById("sim-warning-list");
   const workflow = document.getElementById("sim-workflow-script");
   const copyBtn = document.getElementById("cmd-copy-sim-flow");
@@ -201,8 +226,11 @@ function renderMissionSimulation(simulation) {
   if (staffing) staffing.textContent = String(simulation.staffing_score ?? "-");
   if (trFocus) trFocus.textContent = simulation.translator_focus || "-";
   if (voFocus) voFocus.textContent = simulation.vo_focus || "-";
+  if (operatorSummary) operatorSummary.textContent = simulation.operator_summary || "-";
   if (workflow) workflow.textContent = simulation.workflow_text || "";
   if (copyBtn) copyBtn.dataset.command = simulation.workflow_text || "";
+  renderCommandDeck("sim-action-deck", simulation.action_deck);
+  renderCommandDeck("sim-preset-deck", simulation.preset_deck);
   if (warnList) {
     warnList.innerHTML = "";
     const warnings = Array.isArray(simulation.warnings) ? simulation.warnings : [];

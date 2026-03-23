@@ -85,7 +85,7 @@
         <div class="hero-copy">
           <div class="eyebrow">Operations Dashboard v18</div>
           <h2>Interactive mission operations with live search, fast webhook actions, and cleaner production-facing UI.</h2>
-          <p class="muted">This version adds a mission simulator, preset-driven assign recommendations, and a more operator-friendly workflow deck while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
+          <p class="muted">This version adds live simulator action decks, preset-driven assign recommendations, and a more operator-friendly workflow deck while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
           <div class="pill-row wrap-row hero-meta">
             <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
@@ -442,9 +442,27 @@
                 <div class="highlight-card"><span>Polish</span><strong id="sim-polish">{{ mission_simulation.polish_score }}</strong></div>
                 <div class="highlight-card"><span>Staffing load</span><strong id="sim-staffing">{{ mission_simulation.staffing_score }}</strong></div>
               </div>
+              <div class="detail-item sim-operator-summary-card"><span>Operator summary</span><strong id="sim-operator-summary">{{ mission_simulation.operator_summary }}</strong></div>
               <div class="sim-grid">
                 <div class="detail-item"><span>Translator playbook</span><strong id="sim-translator-focus">{{ mission_simulation.translator_focus }}</strong></div>
                 <div class="detail-item"><span>VO playbook</span><strong id="sim-vo-focus">{{ mission_simulation.vo_focus }}</strong></div>
+              </div>
+              <div class="detail-section no-pad">
+                <div class="section-title">Simulator action deck</div>
+                <p class="muted">These copy-ready actions update live with the selected mission and recommended preset.</p>
+                <div class="sim-action-deck" id="sim-action-deck">
+                  {% for item in mission_simulation.action_deck %}
+                  <button class="btn copy-command-btn{% if item.tone == 'primary' %} btn-primary{% endif %}" type="button" data-command="{{ item.command }}">{{ item.label }}</button>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="detail-section no-pad">
+                <div class="section-title">Preset action deck</div>
+                <div class="sim-preset-deck" id="sim-preset-deck">
+                  {% for item in mission_simulation.preset_deck %}
+                  <button class="btn copy-command-btn{% if item.active %} btn-primary{% endif %}" type="button" data-command="{{ item.command }}">{{ item.label }}</button>
+                  {% endfor %}
+                </div>
               </div>
               <div class="detail-section no-pad">
                 <div class="section-title">Operator warnings</div>
