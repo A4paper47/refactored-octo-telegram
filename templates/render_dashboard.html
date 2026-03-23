@@ -36,7 +36,7 @@
 
         <section>
           <div class="section-title">Current mode</div>
-          <div class="pill-row">
+          <div class="pill-row wrap-row">
             <span class="pill">{{ service.mode }}</span>
             <span class="pill">DB {{ 'READY' if service.web_db_ready else 'CHECK' }}</span>
             <span class="pill status-{{ service.status }}">{{ service.status|upper }}</span>
@@ -47,7 +47,7 @@
           <div class="section-title">Telegram refresh</div>
           <ul class="plain-list muted compact-list">
             <li>/menu dan /help untuk panel utama</li>
-            <li>/inventory, /gearshop, /equip untuk gear flow v13</li>
+            <li>/gearui, /inventory, /gearshop untuk gear flow v14</li>
             <li>/assignui, /board, /missions untuk mission control</li>
           </ul>
         </section>
@@ -62,9 +62,9 @@
     <main class="content">
       <section class="hero card">
         <div class="hero-copy">
-          <div class="eyebrow">Control Center v13</div>
-          <h2>Mission board, DB health, Telegram webhook, dan game loop semua dalam satu panel.</h2>
-          <p class="muted">Versi ini betulkan error SQLAlchemy pada mission board, tambah mission detail preview, dan sambung progression game dengan gear, mission modifiers, dan inventory flow untuk Telegram.</p>
+          <div class="eyebrow">Control Center v14</div>
+          <h2>Dashboard lebih hidup untuk Render, dan Telegram sekarang ada gear/staff actions yang lebih laju.</h2>
+          <p class="muted">Versi ini tambah action center terus dalam website untuk webhook control, mission command deck yang lebih jelas, dan inline gear UI pada Telegram untuk buy, train, rest, equip, dan unequip tanpa perlu taip command panjang.</p>
           <div class="pill-row wrap-row">
             <span class="pill">Webhook {{ service.webhook_path }}</span>
             <span class="pill">External {{ service.render_external_url or 'missing' }}</span>
@@ -73,8 +73,8 @@
           </div>
         </div>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="{{ setup_path }}">Setup webhook</a>
-          <a class="btn" href="{{ webhook_info_path }}">Webhook info</a>
+          <button class="btn btn-primary js-action-btn" data-endpoint="{{ api_action_setup_path }}" data-label="setup webhook" type="button">Setup webhook</button>
+          <button class="btn js-action-btn" data-endpoint="{{ api_action_info_path }}" data-label="webhook info" type="button">Webhook info</button>
           <button class="btn" type="button" id="refresh-status-btn">Refresh status</button>
         </div>
       </section>
@@ -102,22 +102,49 @@
         </article>
       </section>
 
+      <section class="action-grid">
+        <article class="card action-card">
+          <div class="row space-between wrap-row gap-md">
+            <div>
+              <div class="section-title">Action center</div>
+              <p class="muted">Trigger webhook setup, webhook info, atau delete webhook terus dari dashboard tanpa buka route asing.</p>
+            </div>
+            <div class="row gap-sm wrap-row">
+              <button class="btn btn-primary js-action-btn" data-endpoint="{{ api_action_setup_path }}" data-label="setup webhook" type="button">Setup</button>
+              <button class="btn js-action-btn" data-endpoint="{{ api_action_info_path }}" data-label="webhook info" type="button">Info</button>
+              <button class="btn btn-danger js-action-btn" data-endpoint="{{ api_action_delete_path }}" data-label="delete webhook" type="button">Delete</button>
+            </div>
+          </div>
+          <pre id="action-result">Ready.</pre>
+        </article>
+
+        <article class="card compact-card">
+          <div class="section-title">Gameplay v14</div>
+          <div class="chip-row">
+            <span class="chip">Gear UI</span>
+            <span class="chip">Buy via button</span>
+            <span class="chip">Staff card actions</span>
+            <span class="chip">Equip picker</span>
+          </div>
+        </article>
+      </section>
+
       <section class="substats-grid">
         <article class="card compact-card">
           <div class="section-title">Mission totals</div>
-          <div class="chip-row">
+          <div class="chip-row" id="mission-total-chips">
             {% for key, value in (board.counts or {}).items() %}
             <span class="chip">{{ key }} <strong>{{ value }}</strong></span>
             {% endfor %}
           </div>
         </article>
         <article class="card compact-card">
-          <div class="section-title">Gameplay v13</div>
+          <div class="section-title">Website tools</div>
           <div class="chip-row">
-            <span class="chip">Inventory</span>
-            <span class="chip">Gear Shop</span>
-            <span class="chip">Equip Staff</span>
-            <span class="chip">Mission Modifiers</span>
+            <span class="chip">Live status</span>
+            <span class="chip">Command deck</span>
+            <span class="chip">Mission detail preview</span>
+            <span class="chip">Webhook actions</span>
           </div>
         </article>
       </section>
@@ -245,11 +272,7 @@
                 <div class="detail-title" id="detail-title">{{ mission_detail.title if mission_detail else 'Select a mission' }}</div>
                 <div class="muted tiny" id="detail-code">{{ mission_detail.code if mission_detail else '-' }}</div>
               </div>
-              {% if mission_detail %}
-              <a class="btn btn-primary" id="detail-pick-link" href="https://t.me">/pick {{ mission_detail.code }}</a>
-              {% else %}
-              <span class="btn disabled" id="detail-pick-link">/pick -</span>
-              {% endif %}
+              <button class="btn btn-primary copy-command-btn" type="button" id="detail-pick-link" data-command="/pick {{ mission_detail.code if mission_detail else '-' }}">/pick {{ mission_detail.code if mission_detail else '-' }}</button>
             </div>
 
             <div class="detail-grid">
@@ -261,6 +284,17 @@
               <div class="detail-item"><span>Translator</span><strong id="detail-translator">{{ mission_detail.translator if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Reward</span><strong id="detail-reward">{{ mission_detail.reward if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>XP</span><strong id="detail-xp">{{ mission_detail.xp if mission_detail else '-' }}</strong></div>
+            </div>
+
+            <div class="detail-section">
+              <div class="section-title">Command deck</div>
+              <div class="command-grid">
+                <button class="btn copy-command-btn" type="button" id="cmd-pick" data-command="/pick {{ mission_detail.code if mission_detail else '-' }}">Copy /pick</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-assignui" data-command="/assignui">Copy /assignui</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-team" data-command="/team">Copy /team</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-submit" data-command="/submit">Copy /submit</button>
+              </div>
+              <div class="tiny muted" id="copy-feedback">Click mana-mana button untuk copy command ke clipboard.</div>
             </div>
 
             <div class="detail-section">
@@ -339,6 +373,9 @@
 
   <script>
     window.DASHBOARD_API_STATUS = "{{ api_status_path }}";
+    window.DASHBOARD_ACTION_SETUP = "{{ api_action_setup_path }}";
+    window.DASHBOARD_ACTION_DELETE = "{{ api_action_delete_path }}";
+    window.DASHBOARD_ACTION_INFO = "{{ api_action_info_path }}";
   </script>
   <script src="{{ url_for('static', filename='render_dashboard.js') }}"></script>
 </body>

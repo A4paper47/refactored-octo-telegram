@@ -56,6 +56,7 @@ function renderMissionDetail(detail) {
   const reward = document.getElementById("detail-reward");
   const xp = document.getElementById("detail-xp");
   const pickLink = document.getElementById("detail-pick-link");
+  const cmdPick = document.getElementById("cmd-pick");
   const modifiers = document.getElementById("detail-modifiers");
   const roles = document.getElementById("detail-roles");
 
@@ -70,7 +71,12 @@ function renderMissionDetail(detail) {
   if (reward) reward.textContent = detail.reward ?? "-";
   if (xp) xp.textContent = detail.xp ?? "-";
   if (pickLink) {
-    pickLink.textContent = `/pick ${detail.code || "-"}`;
+    const command = `/pick ${detail.code || "-"}`;
+    pickLink.textContent = command;
+    pickLink.dataset.command = command;
+  }
+  if (cmdPick) {
+    cmdPick.dataset.command = `/pick ${detail.code || "-"}`;
   }
   if (modifiers) {
     modifiers.innerHTML = "";
@@ -134,9 +140,58 @@ function bindMissionRows() {
   });
 }
 
+async function runAction(endpoint, label) {
+  const target = document.getElementById("action-result");
+  if (!endpoint) return;
+  if (target) target.textContent = `Running ${label || endpoint}...`;
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+    const data = await resp.json();
+    if (target) {
+      target.textContent = JSON.stringify(data, null, 2);
+    }
+    refreshStatus();
+  } catch (err) {
+    if (target) {
+      target.textContent = `Action failed\n${String(err)}`;
+    }
+  }
+}
+
+function bindActionButtons() {
+  document.querySelectorAll(".js-action-btn").forEach((btn) => {
+    btn.addEventListener("click", () => runAction(btn.dataset.endpoint, btn.dataset.label));
+  });
+}
+
+async function copyCommand(text) {
+  const feedback = document.getElementById("copy-feedback");
+  try {
+    await navigator.clipboard.writeText(text);
+    if (feedback) feedback.textContent = `Copied: ${text}`;
+  } catch (err) {
+    if (feedback) feedback.textContent = `Copy failed: ${String(err)}`;
+  }
+}
+
+function bindCopyButtons() {
+  document.querySelectorAll(".copy-command-btn").forEach((btn) => {
+    btn.addEventListener("click", () => copyCommand(btn.dataset.command || btn.textContent || ""));
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   refreshStatus();
   bindMissionRows();
+  bindActionButtons();
+  bindCopyButtons();
 
   const refreshBtn = document.getElementById("refresh-status-btn");
   if (refreshBtn) refreshBtn.addEventListener("click", refreshStatus);

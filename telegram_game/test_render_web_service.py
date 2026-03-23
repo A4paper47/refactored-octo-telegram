@@ -124,3 +124,28 @@ def test_setup_webhook_route(monkeypatch):
     assert data["url"].endswith(mod.webhook_path())
     assert fake_app.bot.set_calls
     assert fake_app.bot.set_calls[0]["secret_token"] == "hdr-secret"
+
+
+def test_api_action_setup_webhook(monkeypatch):
+    mod = _load_module(monkeypatch, token="token-123")
+    fake_app = FakeApp()
+    mod._game_app = fake_app
+    mod._bot_started = True
+    monkeypatch.setattr(mod, "run_bot_coro", lambda coro: asyncio.run(coro))
+    client = mod.app.test_client()
+
+    resp = client.post("/api/actions/setup-webhook", json={})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert fake_app.bot.set_calls
+
+
+def test_dashboard_contains_action_center(monkeypatch):
+    mod = _load_module(monkeypatch, token="")
+    client = mod.app.test_client()
+    resp = client.get("/dashboard")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "Action center" in body
+    assert "Command deck" in body

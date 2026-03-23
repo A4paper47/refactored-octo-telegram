@@ -1,32 +1,36 @@
-# Telegram UI Notes — v13 Inventory + Gear Loop
+# Telegram UI Notes — v14 Action + Gear UI
 
 ## Main improvements
 
-- added `/inventory`
-- added `/gearshop`
-- added `/buygear <item_key>`
-- added `/equip <staff> <item_key>`
-- added `/unequip <staff>`
-- mission cards now show **modifiers**
-- submit result can now give loot items into inventory
-- home panel now shows inventory count
-- inline menu now includes **Inventory** and **Gear Shop**
+- added `/gearui`
+- `/inventory` and `/gearshop` now return gear-focused inline panels
+- added inline callbacks for:
+  - buy gear
+  - open staff card
+  - train balanced / skill / speed
+  - rest staff
+  - equip picker
+  - equip / unequip
+- `/staff <name>` now opens a richer action panel
+- main menu now has **Gear UI** button
 
 ## Recommended flow
 
 ```text
 /start
 /menu
-/mission
-/accept
-/autocast
-/inventory
+/gearui
+/staff Alya
+/train Alya skill
+/rest Alya
 /gearshop
 /buygear focus_notes
 /equip Alya focus_notes
+/mission
+/accept
+/autocast
 /team
 /submit
-/nextday
 ```
 
 ## Button layout
@@ -36,6 +40,7 @@
 - Accept / Auto Cast / Submit
 - Studio / Market / Clients
 - Roster / Bench / Goals
-- Inventory / Gear Shop / Rep
-- Rest All / Log / Help
-- Sync DB / DB Mission / Next Day
+- Inventory / Gear UI / Gear Shop
+- Rep / Log / Help
+- Rest All / Sync DB / DB Mission
+- Next Day

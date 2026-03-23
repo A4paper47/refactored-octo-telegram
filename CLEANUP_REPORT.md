@@ -1,4 +1,4 @@
-# Cleanup Report — v13
+# Cleanup Report — v14
 
 This package keeps only the files used by the current Render Web Service deployment for the dashboard + Telegram game flow.
 
@@ -18,10 +18,9 @@ This package keeps only the files used by the current Render Web Service deploym
 - `telegram_game/__init__.py`
 - current test files
 
-## Main v13 focus
+## Main v14 focus
 
-- website mission board stability fix
-- dashboard UI refresh
-- mission detail API
-- inventory / gear gameplay loop
-- mission modifiers layer
+- live website action center for webhook tasks
+- cleaner dashboard mission command deck
+- richer Telegram inline gear UI
+- inline train / rest / equip / unequip flow

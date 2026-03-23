@@ -30,6 +30,7 @@ from telegram_game.game_engine import (
     client_summary,
     clear_assignments,
     current_team_summary,
+    EQUIPMENT_CATALOG,
     ensure_mission,
     equip_gear,
     fire_staff,
@@ -136,9 +137,11 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🏢 Studio", callback_data="g|studio"), InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🤝 Clients", callback_data="g|clients")],
         [InlineKeyboardButton("👤 Roster", callback_data="g|roster"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("🏆 Goals", callback_data="g|goals")],
-        [InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"), InlineKeyboardButton("🧰 Gear Shop", callback_data="g|gearshop"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation")],
-        [InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
-        [InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
+        [InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"), InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"), InlineKeyboardButton("🧰 Gear Shop", callback_data="g|gearshop")],
+        [InlineKeyboardButton("⭐ Rep", callback_data="g|reputation"), InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
+        [InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission")],
+        [InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
+
     ])
 
 
@@ -165,7 +168,7 @@ Main commands:
 /rest <nama> /restall — recover energy & burnout
 /goals — achievement dan milestone
 /market /hire /fire — recruitment
-/inventory /gearshop — inventory dan shop
+/inventory /gearshop /gearui — inventory, shop, dan inline gear panel
 /buygear <item_key> — beli gear
 /equip <staff> <item_key> /unequip <staff> — pasang gear staff
 /studio /clients /reputation — studio panel
@@ -387,6 +390,119 @@ def _submit_warning_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⚠️ Proceed QA", callback_data="g|submitconfirm")],
         [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
     ])
+
+
+def _gear_inventory_count(state) -> int:
+    return sum(int(qty or 0) for qty in state.inventory.values() if int(qty or 0) > 0)
+
+
+def _gear_staff_candidates(state, limit: int = 10):
+    order = {"translator": 0, "male": 1, "female": 2}
+    return sorted(
+        state.roster,
+        key=lambda member: (order.get(member.role_type, 9), -member.level, -member.power(), member.name.lower()),
+    )[:limit]
+
+
+def _gear_shop_keyboard(state) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    items = sorted(EQUIPMENT_CATALOG.items(), key=lambda item: (item[1].get("cost", 0), item[1].get("label", item[0])))
+    for idx in range(0, len(items), 2):
+        chunk = items[idx:idx+2]
+        rows.append([
+            InlineKeyboardButton(f"+ {meta['label']}", callback_data=f"g|buygearui|{key}")
+            for key, meta in chunk
+        ])
+    rows.append([
+        InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"),
+        InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _gear_ui_keyboard(state) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("🧰 Shop", callback_data="g|gearshopui"), InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory")],
+    ]
+    staff_buttons = [
+        InlineKeyboardButton(f"🧾 {member.name}", callback_data=f"g|staffcard|{_name_token(member.name)}")
+        for member in _gear_staff_candidates(state)
+    ]
+    for idx in range(0, len(staff_buttons), 2):
+        rows.append(staff_buttons[idx:idx+2])
+    rows.append([InlineKeyboardButton("⬅️ Menu", callback_data="g|menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _gear_ui_text(state) -> str:
+    return (
+        f"🧩 Gear control center\n"
+        f"Coins {state.coins} | Inventory {_gear_inventory_count(state)} item | Roster {len(state.roster)} staff\n\n"
+        f"Tap staff card untuk train/rest/equip. Tap shop untuk beli gear baru."
+    )
+
+
+def _staff_action_keyboard(state, staff_name: str) -> InlineKeyboardMarkup:
+    name_token = _name_token(staff_name)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⚖️ Train", callback_data=f"g|trainstaff|{name_token}|balanced"),
+            InlineKeyboardButton("💪 Skill", callback_data=f"g|trainstaff|{name_token}|skill"),
+        ],
+        [
+            InlineKeyboardButton("⚡ Speed", callback_data=f"g|trainstaff|{name_token}|speed"),
+            InlineKeyboardButton("🛌 Rest", callback_data=f"g|reststaff|{name_token}"),
+        ],
+        [
+            InlineKeyboardButton("🎯 Equip", callback_data=f"g|equippick|{name_token}"),
+            InlineKeyboardButton("🎒 Unequip", callback_data=f"g|unequipstaff|{name_token}"),
+        ],
+        [
+            InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"),
+            InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"),
+        ],
+    ])
+
+
+def _compatible_gear_items(state, staff_name: str) -> list[tuple[str, dict]]:
+    member = next((item for item in state.roster if item.name.lower() == staff_name.lower()), None)
+    if member is None:
+        return []
+    items: list[tuple[str, dict]] = []
+    for key, qty in sorted(state.inventory.items()):
+        if int(qty or 0) <= 0:
+            continue
+        meta = EQUIPMENT_CATALOG.get(key) or {}
+        roles = set(meta.get("roles", []))
+        if member.role_type in roles:
+            items.append((key, meta))
+    items.sort(key=lambda item: (item[1].get("cost", 0), item[1].get("label", item[0])), reverse=True)
+    return items
+
+
+def _equip_picker_keyboard(state, staff_name: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, (key, meta) in enumerate(_compatible_gear_items(state, staff_name)):
+        label = str(meta.get("label", key))
+        qty = int(state.inventory.get(key, 0))
+        rows.append([InlineKeyboardButton(f"{label} x{qty}", callback_data=f"g|equipdo|{_name_token(staff_name)}|{key}")])
+        if idx >= 7:
+            break
+    rows.append([
+        InlineKeyboardButton("⬅️ Staff", callback_data=f"g|staffcard|{_name_token(staff_name)}"),
+        InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _equip_picker_text(state, staff_name: str) -> str:
+    items = _compatible_gear_items(state, staff_name)
+    if not items:
+        return f"🎯 Equip picker — {staff_name}\nTak ada gear sesuai dalam inventory sekarang."
+    lines = [f"🎯 Equip picker — {staff_name}", "Pilih gear yang sesuai:"]
+    for key, meta in items[:8]:
+        lines.append(f"- {meta.get('label', key)} x{state.inventory.get(key, 0)} | {meta.get('desc', '-')}")
+    return "\n".join(lines)
 
 
 def _board_keyboard() -> InlineKeyboardMarkup:
@@ -951,7 +1067,8 @@ async def cmd_staff(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    markup = _staff_action_keyboard(state, name) if name and not text.startswith('❌') else _menu()
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def cmd_train(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -981,7 +1098,8 @@ async def cmd_train(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    markup = _staff_action_keyboard(state, name) if name and not text.startswith('❌') else _menu()
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def cmd_rest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1005,7 +1123,8 @@ async def cmd_rest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    markup = _staff_action_keyboard(state, name) if name and not text.startswith('❌') else _menu()
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def cmd_restall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1029,13 +1148,19 @@ async def cmd_restall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def cmd_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _save(state)
-    await update.effective_message.reply_text(inventory_summary(state), reply_markup=_menu())
+    await update.effective_message.reply_text(inventory_summary(state), reply_markup=_gear_ui_keyboard(state))
 
 
 async def cmd_gearshop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _save(state)
-    await update.effective_message.reply_text(gear_shop_summary(state), reply_markup=_menu())
+    await update.effective_message.reply_text(gear_shop_summary(state), reply_markup=_gear_shop_keyboard(state))
+
+
+async def cmd_gearui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    _save(state)
+    await update.effective_message.reply_text(_gear_ui_text(state), reply_markup=_gear_ui_keyboard(state))
 
 
 async def cmd_buygear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1050,7 +1175,7 @@ async def cmd_buygear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    await update.effective_message.reply_text(text, reply_markup=_gear_shop_keyboard(state))
 
 
 async def cmd_equip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1068,7 +1193,8 @@ async def cmd_equip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    markup = _staff_action_keyboard(state, staff_name) if 'staff_name' in locals() and staff_name and not text.startswith('❌') else _gear_ui_keyboard(state)
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def cmd_unequip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1083,7 +1209,8 @@ async def cmd_unequip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except Exception as exc:
             text = f"❌ {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    markup = _staff_action_keyboard(state, staff_name) if staff_name and not text.startswith('❌') else _gear_ui_keyboard(state)
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1184,6 +1311,113 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.effective_message.reply_text(text, reply_markup=_assign_ui_keyboard(state))
         return
 
+    if len(parts) >= 2 and parts[1] == "gearshopui":
+        state = _load_or_create(update.effective_user.id)
+        _save(state)
+        await update.effective_message.reply_text(gear_shop_summary(state), reply_markup=_gear_shop_keyboard(state))
+        return
+
+    if len(parts) >= 3 and parts[1] == "buygearui":
+        state = _load_or_create(update.effective_user.id)
+        item_key = parts[2].strip()
+        try:
+            info = buy_gear(state, item_key)
+            text = f"🧰 Gear dibeli: {info['label']}\nCost: {info['cost']}\nQty sekarang: {info['qty']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        await update.effective_message.reply_text(text, reply_markup=_gear_shop_keyboard(state))
+        return
+
+    if len(parts) >= 3 and parts[1] == "staffcard":
+        state = _load_or_create(update.effective_user.id)
+        staff_name = _name_from_token(parts[2])
+        try:
+            text = staff_detail_summary(state, staff_name)
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        markup = _staff_action_keyboard(state, staff_name) if not text.startswith('❌') else _gear_ui_keyboard(state)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+
+    if len(parts) >= 4 and parts[1] == "trainstaff":
+        state = _load_or_create(update.effective_user.id)
+        staff_name = _name_from_token(parts[2])
+        focus = parts[3].strip().lower() or "balanced"
+        try:
+            info = train_staff(state, staff_name, focus=focus)
+            member = info["member"]
+            text = (
+                f"🏋️ Training siap untuk {member.name}\n"
+                f"Focus: {info['focus']} | Cost: {info['cost']}\n"
+                f"Skill {member.skill} | Speed {member.speed} | Level {member.level}\n"
+                f"Energy {member.energy} | Burnout {member.burnout}"
+            )
+            if info.get("level_up"):
+                text += "\n✨ Level up!"
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        markup = _staff_action_keyboard(state, staff_name) if not text.startswith('❌') else _gear_ui_keyboard(state)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+
+    if len(parts) >= 3 and parts[1] == "reststaff":
+        state = _load_or_create(update.effective_user.id)
+        staff_name = _name_from_token(parts[2])
+        try:
+            info = rest_staff(state, staff_name)
+            member = info["member"]
+            text = (
+                f"🛌 Rest siap untuk {member.name}\n"
+                f"Cost: {info['cost']}\n"
+                f"Energy +{info['energy_recovered']} | Burnout -{info['burnout_reduced']}\n"
+                f"Energy now {member.energy} | Burnout now {member.burnout}"
+            )
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        markup = _staff_action_keyboard(state, staff_name) if not text.startswith('❌') else _gear_ui_keyboard(state)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+
+    if len(parts) >= 3 and parts[1] == "equippick":
+        state = _load_or_create(update.effective_user.id)
+        staff_name = _name_from_token(parts[2])
+        _save(state)
+        await update.effective_message.reply_text(_equip_picker_text(state, staff_name), reply_markup=_equip_picker_keyboard(state, staff_name))
+        return
+
+    if len(parts) >= 4 and parts[1] == "equipdo":
+        state = _load_or_create(update.effective_user.id)
+        staff_name = _name_from_token(parts[2])
+        item_key = parts[3].strip()
+        try:
+            info = equip_gear(state, staff_name, item_key)
+            text = f"🎯 {info['member'].name} equip {info['label']}"
+            if info.get('previous'):
+                text += f"\nPrevious returned to inventory: {info['previous']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        markup = _staff_action_keyboard(state, staff_name) if not text.startswith('❌') else _gear_ui_keyboard(state)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+
+    if len(parts) >= 3 and parts[1] == "unequipstaff":
+        state = _load_or_create(update.effective_user.id)
+        staff_name = _name_from_token(parts[2])
+        try:
+            info = unequip_gear(state, staff_name)
+            text = f"🎒 {info['member'].name} unequip {info['label']}"
+        except Exception as exc:
+            text = f"❌ {exc}"
+        _save(state)
+        markup = _staff_action_keyboard(state, staff_name) if not text.startswith('❌') else _gear_ui_keyboard(state)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+
     if len(parts) >= 2 and parts[1] == "submitconfirm":
         await _finalize_submit(update, context)
         return
@@ -1210,6 +1444,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "reputation": cmd_reputation,
         "goals": cmd_goals,
         "inventory": cmd_inventory,
+        "gearui": cmd_gearui,
         "gearshop": cmd_gearshop,
         "restall": cmd_restall,
         "log": cmd_log,
@@ -1256,6 +1491,7 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("rest", cmd_rest))
     app.add_handler(CommandHandler("restall", cmd_restall))
     app.add_handler(CommandHandler("inventory", cmd_inventory))
+    app.add_handler(CommandHandler("gearui", cmd_gearui))
     app.add_handler(CommandHandler("gearshop", cmd_gearshop))
     app.add_handler(CommandHandler("buygear", cmd_buygear))
     app.add_handler(CommandHandler("equip", cmd_equip))

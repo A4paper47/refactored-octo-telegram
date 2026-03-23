@@ -1,18 +1,21 @@
-# Studio Dub Tycoon — Render Web Service Edition (v13)
+# Studio Dub Tycoon — Render Web Service Edition (v14)
 
 This is the cleaned deployment package for the Telegram + web dashboard version of Studio Dub Tycoon.
 
-## What changed in v13
+## What changed in v14
 
-- fixed the mission board SQLAlchemy app-registration error on the website
-- refreshed the website dashboard UI with a mission detail panel and better status cards
-- added `GET /api/mission/<movie_code>`
-- added v13 gameplay layer:
-  - inventory
-  - gear shop
-  - equip / unequip staff
-  - mission modifiers
-  - chest-style loot drops on successful submissions
+- refreshed the website dashboard UI again with a live **Action center**
+- added website-side action APIs for:
+  - `POST /api/actions/setup-webhook`
+  - `POST /api/actions/webhook-info`
+  - `POST /api/actions/delete-webhook`
+- improved mission detail panel with **command deck** buttons for Telegram flow
+- added Telegram **inline gear UI**:
+  - `/gearui`
+  - buy gear from buttons
+  - open staff card from buttons
+  - inline train / rest / equip / unequip flow
+  - inline equip picker for compatible gear
 
 ## What is inside
 
@@ -58,6 +61,9 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/api/missions`
 - `/api/mission/<movie_code>`
 - `/api/manifest`
+- `/api/actions/setup-webhook`
+- `/api/actions/webhook-info`
+- `/api/actions/delete-webhook`
 - `/telegram/setup-webhook`
 - `/telegram/webhook-info`
 - `/telegram/delete-webhook`
@@ -80,6 +86,7 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/staff <name>`
 - `/inventory`
 - `/gearshop`
+- `/gearui`
 - `/buygear <item_key>`
 - `/equip <staff> <item_key>`
 - `/unequip <staff>`

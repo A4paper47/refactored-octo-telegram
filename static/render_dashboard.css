@@ -355,3 +355,44 @@ tr.is-active td { background: rgba(112, 200, 255, 0.08); }
   .filters { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
 }
+
+.action-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.action-card pre,
+#action-result {
+  margin: 14px 0 0;
+  min-height: 148px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(3, 9, 18, 0.72);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.btn-danger {
+  border-color: rgba(255, 122, 144, 0.35);
+  background: rgba(255, 122, 144, 0.1);
+}
+.btn-danger:hover {
+  border-color: rgba(255, 122, 144, 0.55);
+  background: rgba(255, 122, 144, 0.16);
+}
+#copy-feedback {
+  margin-top: 10px;
+}
+@media (max-width: 1100px) {
+  .action-grid {
+    grid-template-columns: 1fr;
+  }
+}

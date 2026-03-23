@@ -424,6 +424,9 @@ def dashboard():
         api_missions_path=url_for("api_missions"),
         api_manifest_path=url_for("api_manifest"),
         api_mission_detail_base=url_for("api_mission_detail", movie_code="__CODE__"),
+        api_action_setup_path=url_for("api_action_setup_webhook"),
+        api_action_delete_path=url_for("api_action_delete_webhook"),
+        api_action_info_path=url_for("api_action_webhook_info"),
         health_path=url_for("health"),
     )
 
@@ -456,6 +459,54 @@ def api_mission_detail(movie_code: str):
     if detail is None:
         return jsonify({"ok": False, "message": "Mission not found"}), 404
     return jsonify({"ok": True, "detail": detail})
+
+
+@app.route("/api/actions/setup-webhook", methods=["POST"])
+def api_action_setup_webhook():
+    if not BOT_ENABLED:
+        return jsonify({"ok": False, "message": "BOT_TOKEN missing"}), 503
+    if not _bot_started and not _ensure_bot_started():
+        return jsonify({"ok": False, "message": _bot_start_error or "bot startup failed"}), 503
+    payload = request.get_json(silent=True) or {}
+    explicit_base_url = str(payload.get("base_url") or "").strip() or None
+    drop_pending = bool(payload.get("drop_pending"))
+    try:
+        info = run_bot_coro(_set_webhook_if_possible(drop_pending_updates=drop_pending, explicit_base_url=explicit_base_url))
+    except Exception as exc:
+        log.exception("API setup webhook failed: %s", exc)
+        return jsonify({"ok": False, "message": str(exc)}), 500
+    status = 200 if info.get("ok") else 400
+    return jsonify(info), status
+
+
+@app.route("/api/actions/delete-webhook", methods=["POST"])
+def api_action_delete_webhook():
+    if not BOT_ENABLED:
+        return jsonify({"ok": False, "message": "BOT_TOKEN missing"}), 503
+    if not _bot_started and not _ensure_bot_started():
+        return jsonify({"ok": False, "message": _bot_start_error or "bot startup failed"}), 503
+    payload = request.get_json(silent=True) or {}
+    drop_pending = bool(payload.get("drop_pending"))
+    try:
+        info = run_bot_coro(_delete_webhook(drop_pending_updates=drop_pending))
+    except Exception as exc:
+        log.exception("API delete webhook failed: %s", exc)
+        return jsonify({"ok": False, "message": str(exc)}), 500
+    return jsonify(info)
+
+
+@app.route("/api/actions/webhook-info", methods=["POST"])
+def api_action_webhook_info():
+    if not BOT_ENABLED:
+        return jsonify({"ok": False, "message": "BOT_TOKEN missing"}), 503
+    if not _bot_started and not _ensure_bot_started():
+        return jsonify({"ok": False, "message": _bot_start_error or "bot startup failed"}), 503
+    try:
+        info = run_bot_coro(_get_webhook_info())
+    except Exception as exc:
+        log.exception("API webhook info failed: %s", exc)
+        return jsonify({"ok": False, "message": str(exc)}), 500
+    return jsonify(info)
 
 
 @app.route("/health")
