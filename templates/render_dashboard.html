@@ -17,7 +17,7 @@
         <div>
           <div class="eyebrow">Render Web Service</div>
           <h1>Studio Dub Tycoon</h1>
-          <p class="sidebar-copy">Operations dashboard for webhook health, mission visibility, and Telegram control.</p>
+          <p class="sidebar-copy">Production-style control surface for webhook health, mission browsing, and Telegram game operations.</p>
         </div>
       </div>
 
@@ -68,7 +68,7 @@
             <li><code>/menu</code> for the main control panel</li>
             <li><code>/missions</code> or <code>/board</code> to review available work</li>
             <li><code>/assignui</code>, <code>/team</code>, and <code>/submit</code> for active mission flow</li>
-            <li><code>/gearui</code>, <code>/inventory</code>, and <code>/gearshop</code> for staff progression</li>
+            <li><code>/rosterui</code>, <code>/staff</code>, and <code>/gearui</code> for staff progression</li>
           </ul>
         </section>
 
@@ -82,9 +82,9 @@
     <main class="content">
       <section class="hero card" id="overview">
         <div class="hero-copy">
-          <div class="eyebrow">Operations Dashboard v15</div>
-          <h2>Professional control surface for Telegram webhook, mission board, and live service health.</h2>
-          <p class="muted">This version refines the dashboard hierarchy, improves empty states, cleans up wording, and makes mission operations easier to scan and act on during live testing or production support.</p>
+          <div class="eyebrow">Operations Dashboard v16</div>
+          <h2>Interactive mission operations with live search, fast webhook actions, and cleaner production-facing UI.</h2>
+          <p class="muted">This version improves dashboard usability with client-side mission search, quick filters, clearer summaries, and smoother action feedback while keeping the Telegram game workflow front and centre.</p>
           <div class="pill-row wrap-row hero-meta">
             <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
@@ -133,12 +133,20 @@
           </div>
         </article>
         <article class="card compact-card metric-card">
-          <div class="section-title">Dashboard tools</div>
-          <div class="chip-row">
-            <span class="chip">Live status refresh</span>
-            <span class="chip">Webhook controls</span>
-            <span class="chip">Mission detail panel</span>
-            <span class="chip">Telegram command deck</span>
+          <div class="section-title">Live board insights</div>
+          <div class="insight-grid">
+            <div class="insight-item">
+              <span>Filtered rows</span>
+              <strong id="mission-visible-count">{{ board.total }}</strong>
+            </div>
+            <div class="insight-item">
+              <span>Total rows</span>
+              <strong id="mission-total-count">{{ board.total }}</strong>
+            </div>
+            <div class="insight-item">
+              <span>Selected mission</span>
+              <strong id="selected-mission-code">{{ mission_detail.code if mission_detail else '-' }}</strong>
+            </div>
           </div>
         </article>
       </section>
@@ -158,9 +166,10 @@
               </div>
             </div>
             <div class="action-meta row space-between wrap-row gap-md">
-              <div class="tiny muted">Live action output appears below. Use this during setup, health checks, and webhook recovery.</div>
+              <div class="tiny muted">Use these controls during deploy, recovery, or webhook verification.</div>
               <div class="tiny muted" id="last-refresh-text">Last refresh: waiting…</div>
             </div>
+            <div class="action-banner" id="action-banner">Ready for action.</div>
             <pre id="action-result">Ready.</pre>
           </article>
 
@@ -168,7 +177,7 @@
             <div class="row space-between align-start gap-md wrap-row">
               <div>
                 <div class="section-title">Mission board</div>
-                <p class="muted">Filter database-backed missions, inspect details, and copy Telegram commands for the selected item.</p>
+                <p class="muted">Filter database-backed missions, search instantly on the page, inspect details, and copy Telegram commands for the selected item.</p>
               </div>
               <div class="row gap-sm wrap-row">
                 <a class="btn" href="{{ api_missions_path }}">Open JSON</a>
@@ -179,7 +188,7 @@
             <form class="filters" method="get" action="{{ url_for('dashboard') }}">
               <label>
                 <span>Status</span>
-                <select name="status">
+                <select name="status" id="status-filter-select">
                   <option value="" {% if not filters.status %}selected{% endif %}>All</option>
                   {% for st in ['NEW','IN_PROGRESS','READY','COMPLETED'] %}
                   <option value="{{ st }}" {% if filters.status == st %}selected{% endif %}>{{ st }}</option>
@@ -192,7 +201,7 @@
               </label>
               <label>
                 <span>Priority</span>
-                <select name="priority">
+                <select name="priority" id="priority-filter-select">
                   <option value="" {% if not filters.priority %}selected{% endif %}>All</option>
                   {% for pr in ['superurgent','urgent','nonurgent','flexible'] %}
                   <option value="{{ pr }}" {% if filters.priority == pr %}selected{% endif %}>{{ pr|title }}</option>
@@ -213,6 +222,25 @@
                 <a class="btn" href="{{ url_for('dashboard') }}">Reset</a>
               </div>
             </form>
+
+            <div class="search-tools">
+              <label class="search-box">
+                <span>Quick search</span>
+                <input type="search" id="mission-search-input" placeholder="Search by code, title, translator, language, or priority">
+              </label>
+              <div class="quick-filter-row">
+                <button class="quick-filter-btn" type="button" data-filter-type="status" data-filter-value="NEW">NEW</button>
+                <button class="quick-filter-btn" type="button" data-filter-type="status" data-filter-value="IN_PROGRESS">IN PROGRESS</button>
+                <button class="quick-filter-btn" type="button" data-filter-type="status" data-filter-value="READY">READY</button>
+                <button class="quick-filter-btn" type="button" data-filter-type="priority" data-filter-value="superurgent">SUPERURGENT</button>
+                <button class="quick-filter-btn" type="button" data-filter-type="priority" data-filter-value="flexible">FLEXIBLE</button>
+              </div>
+            </div>
+
+            <div class="board-toolbar row space-between wrap-row gap-md">
+              <div class="tiny muted" id="board-summary-text">Page {{ board.page }} / {{ board.total_pages }} · Total {{ board.total }}</div>
+              <div class="tiny muted" id="client-filter-feedback">Use quick search for instant filtering without reloading the page.</div>
+            </div>
 
             {% if board.error %}
             <div class="notice error">
@@ -237,7 +265,15 @@
                 </thead>
                 <tbody>
                   {% for item in board['items'] %}
-                  <tr class="mission-row {% if selected_code == item.code %}is-active{% endif %}" data-code="{{ item.code }}" data-detail-url="{{ api_mission_detail_base.replace('__CODE__', item.code) }}">
+                  <tr class="mission-row {% if selected_code == item.code %}is-active{% endif %}"
+                      data-code="{{ item.code }}"
+                      data-title="{{ item.title|lower }}"
+                      data-translator="{{ (item.translator or '')|lower }}"
+                      data-lang="{{ (item.lang or '')|lower }}"
+                      data-priority="{{ (item.priority or '')|lower }}"
+                      data-status="{{ (item.status or '')|lower }}"
+                      data-search="{{ (item.code ~ ' ' ~ item.title ~ ' ' ~ (item.translator or '') ~ ' ' ~ (item.lang or '') ~ ' ' ~ (item.priority or '') ~ ' ' ~ (item.status or ''))|lower }}"
+                      data-detail-url="{{ api_mission_detail_base.replace('__CODE__', item.code) }}">
                     <td><code>{{ item.code }}</code></td>
                     <td>
                       <div class="cell-title">{{ item.title }}</div>
@@ -253,6 +289,13 @@
                   {% endfor %}
                 </tbody>
               </table>
+            </div>
+            <div class="table-empty-client hidden" id="client-empty-state">
+              <div class="empty-state-mark">⌕</div>
+              <div>
+                <h3>No visible missions match the quick search.</h3>
+                <p class="muted">Clear the client-side search box or adjust the current filters to show more rows.</p>
+              </div>
             </div>
             {% else %}
             <div class="empty-state">
@@ -300,11 +343,14 @@
               <button class="btn btn-primary copy-command-btn" type="button" id="detail-pick-link" data-command="/pick {{ mission_detail.code if mission_detail else '-' }}">/pick {{ mission_detail.code if mission_detail else '-' }}</button>
             </div>
 
+            <div class="detail-highlight-grid">
+              <div class="highlight-card"><span>Client</span><strong id="detail-client">{{ mission_detail.client_name if mission_detail else '-' }}</strong></div>
+              <div class="highlight-card"><span>Tier</span><strong id="detail-tier">{{ mission_detail.client_tier if mission_detail else '-' }}</strong></div>
+              <div class="highlight-card"><span>Status</span><strong id="detail-status">{{ mission_detail.status if mission_detail else '-' }}</strong></div>
+              <div class="highlight-card"><span>Priority</span><strong id="detail-priority">{{ mission_detail.priority if mission_detail else '-' }}</strong></div>
+            </div>
+
             <div class="detail-grid">
-              <div class="detail-item"><span>Client</span><strong id="detail-client">{{ mission_detail.client_name if mission_detail else '-' }}</strong></div>
-              <div class="detail-item"><span>Tier</span><strong id="detail-tier">{{ mission_detail.client_tier if mission_detail else '-' }}</strong></div>
-              <div class="detail-item"><span>Status</span><strong id="detail-status">{{ mission_detail.status if mission_detail else '-' }}</strong></div>
-              <div class="detail-item"><span>Priority</span><strong id="detail-priority">{{ mission_detail.priority if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Language</span><strong id="detail-lang">{{ mission_detail.lang if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Translator</span><strong id="detail-translator">{{ mission_detail.translator if mission_detail else '-' }}</strong></div>
               <div class="detail-item"><span>Reward</span><strong id="detail-reward">{{ mission_detail.reward if mission_detail else '-' }}</strong></div>
@@ -318,6 +364,7 @@
                 <button class="btn copy-command-btn" type="button" id="cmd-assignui" data-command="/assignui">Copy /assignui</button>
                 <button class="btn copy-command-btn" type="button" id="cmd-team" data-command="/team">Copy /team</button>
                 <button class="btn copy-command-btn" type="button" id="cmd-submit" data-command="/submit">Copy /submit</button>
+                <a class="btn" id="cmd-json-detail" href="{{ api_mission_detail_base.replace('__CODE__', mission_detail.code if mission_detail else '__CODE__') }}">Open detail JSON</a>
               </div>
               <div class="tiny muted" id="copy-feedback">Use the command deck to copy Telegram actions for the selected mission.</div>
             </div>

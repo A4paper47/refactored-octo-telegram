@@ -108,3 +108,9 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 pytest -q
 python -m py_compile telegram_game/*.py render_game_web.py
 ```
+
+
+## v16 highlights
+- Live mission search and quick filters on the Render dashboard
+- Cleaner action feedback and selected-mission insight cards
+- Telegram `/rosterui` paged staff browser for faster game navigation

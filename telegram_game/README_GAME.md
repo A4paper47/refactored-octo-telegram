@@ -36,3 +36,8 @@
 - Rep / Log / Help
 - Rest All / Sync DB / DB Mission
 - Next Day
+
+
+### v16 UI updates
+- `/rosterui [page]` opens a paged roster browser with direct staff-card buttons
+- Dashboard now supports quick mission search and quick status/priority filters

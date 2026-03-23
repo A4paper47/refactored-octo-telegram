@@ -136,7 +136,7 @@ def _menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui"), InlineKeyboardButton("👥 Team", callback_data="g|team")],
         [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
         [InlineKeyboardButton("🏢 Studio", callback_data="g|studio"), InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🤝 Clients", callback_data="g|clients")],
-        [InlineKeyboardButton("👤 Roster", callback_data="g|roster"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("🏆 Goals", callback_data="g|goals")],
+        [InlineKeyboardButton("👤 Roster UI", callback_data="g|rosterui"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("🏆 Goals", callback_data="g|goals")],
         [InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"), InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"), InlineKeyboardButton("🧰 Gear Shop", callback_data="g|gearshop")],
         [InlineKeyboardButton("⭐ Rep", callback_data="g|reputation"), InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
         [InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission")],
@@ -163,6 +163,7 @@ Core controls:
 /board — board snapshot
 /assignui — assign with buttons
 /team /bench /roster — staff overview
+/rosterui [page] — paged staff browser
 /staff <name> — staff profile
 /train <name> [balanced|skill|speed] — improve a staff member
 /rest <name> /restall — recover energy and reduce burnout
@@ -195,7 +196,7 @@ def _home_text(state) -> str:
         f"- Translator: {mission.assigned_translator or '-'}",
         f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
         "",
-        "Use the buttons below for the fastest flow. Run /help for the full guide.",
+        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /rosterui for paged staff browsing.",
     ]
     return chr(10).join(lines)
 
@@ -430,6 +431,55 @@ def _gear_ui_keyboard(state) -> InlineKeyboardMarkup:
     ]
     for idx in range(0, len(staff_buttons), 2):
         rows.append(staff_buttons[idx:idx+2])
+    rows.append([InlineKeyboardButton("⬅️ Menu", callback_data="g|menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _roster_page_items(state, page: int = 1, per_page: int = 6):
+    ordered = sorted(state.roster, key=lambda member: (member.role_type, -member.level, member.name.lower()))
+    total = len(ordered)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * per_page
+    items = ordered[start:start + per_page]
+    return items, page, total_pages, total
+
+
+def _roster_ui_text(state, page: int = 1) -> str:
+    items, page, total_pages, total = _roster_page_items(state, page)
+    lines = [
+        "👥 Roster browser",
+        f"Page {page}/{total_pages} · Total staff {total}",
+        "Tap a staff button below to open the full card.",
+        "",
+    ]
+    if not items:
+        lines.append("- Roster kosong")
+    for member in items:
+        gear = EQUIPMENT_CATALOG.get(member.equipped, {}).get("label", "-") if member.equipped else "-"
+        traits = ", ".join(member.traits[:2]) if member.traits else "-"
+        lines.append(
+            f"- {member.name} | {member.role_type} | lvl {member.level} | rarity {member.rarity} | energy {member.energy} | gear {gear} | traits {traits}"
+        )
+    return "\n".join(lines)
+
+
+def _roster_ui_keyboard(state, page: int = 1) -> InlineKeyboardMarkup:
+    items, page, total_pages, _ = _roster_page_items(state, page)
+    rows: list[list[InlineKeyboardButton]] = []
+    for member in items:
+        rows.append([InlineKeyboardButton(f"🧾 {member.name} · {member.role_type}", callback_data=f"g|staffcard|{_name_token(member.name)}")])
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|rosterpage|{page-1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|rosterpage|{page+1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([
+        InlineKeyboardButton("📜 Text roster", callback_data="g|roster"),
+        InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"),
+    ])
     rows.append([InlineKeyboardButton("⬅️ Menu", callback_data="g|menu")])
     return InlineKeyboardMarkup(rows)
 
@@ -977,6 +1027,19 @@ async def cmd_roster(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(roster_summary(state), reply_markup=_menu())
 
 
+async def cmd_rosterui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    page = 1
+    args = list(getattr(context, "args", None) or [])
+    if args:
+        try:
+            page = max(1, int(args[0]))
+        except ValueError:
+            page = 1
+    _save(state)
+    await update.effective_message.reply_text(_roster_ui_text(state, page), reply_markup=_roster_ui_keyboard(state, page))
+
+
 async def cmd_team(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _ensure_bot_mission(state)
@@ -1341,6 +1404,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.effective_message.reply_text(text, reply_markup=markup)
         return
 
+    if len(parts) >= 3 and parts[1] == "rosterpage":
+        state = _load_or_create(update.effective_user.id)
+        try:
+            page = max(1, int(parts[2]))
+        except ValueError:
+            page = 1
+        _save(state)
+        await update.effective_message.reply_text(_roster_ui_text(state, page), reply_markup=_roster_ui_keyboard(state, page))
+        return
+
     if len(parts) >= 4 and parts[1] == "trainstaff":
         state = _load_or_create(update.effective_user.id)
         staff_name = _name_from_token(parts[2])
@@ -1436,6 +1509,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "autocast": cmd_autocast,
         "submit": cmd_submit,
         "roster": cmd_roster,
+        "rosterui": cmd_rosterui,
         "team": cmd_team,
         "bench": cmd_bench,
         "market": cmd_market,
@@ -1481,6 +1555,7 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("clearcast", cmd_clearcast))
     app.add_handler(CommandHandler("submit", cmd_submit))
     app.add_handler(CommandHandler("roster", cmd_roster))
+    app.add_handler(CommandHandler("rosterui", cmd_rosterui))
     app.add_handler(CommandHandler("staff", cmd_staff))
     app.add_handler(CommandHandler("team", cmd_team))
     app.add_handler(CommandHandler("bench", cmd_bench))

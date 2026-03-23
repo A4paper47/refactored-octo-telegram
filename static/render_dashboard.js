@@ -7,6 +7,13 @@ function setRefreshText(id, prefix) {
   if (node) node.textContent = `${prefix} ${nowStamp()}`;
 }
 
+function setActionBanner(message, kind = "info") {
+  const banner = document.getElementById("action-banner");
+  if (!banner) return;
+  banner.textContent = message;
+  banner.className = `action-banner action-${kind}`;
+}
+
 async function refreshStatus() {
   const endpoint = window.DASHBOARD_API_STATUS;
   if (!endpoint) return;
@@ -38,6 +45,7 @@ async function refreshStatus() {
     if (pre) {
       pre.textContent = JSON.stringify(data, null, 2);
     }
+    setActionBanner("Service status refreshed.", "success");
     setRefreshText("status-updated-text", "Status updated:");
     setRefreshText("last-refresh-text", "Last refresh:");
   } catch (err) {
@@ -45,6 +53,7 @@ async function refreshStatus() {
     if (pre) {
       pre.textContent = `Failed to load status\n${String(err)}`;
     }
+    setActionBanner(`Status refresh failed: ${String(err)}`, "error");
     setRefreshText("status-updated-text", "Refresh failed at");
   }
 }
@@ -53,6 +62,8 @@ function setMissionRowActive(code) {
   document.querySelectorAll(".mission-row").forEach((row) => {
     row.classList.toggle("is-active", row.dataset.code === code);
   });
+  const selected = document.getElementById("selected-mission-code");
+  if (selected) selected.textContent = code || "-";
 }
 
 function renderMissionDetail(detail) {
@@ -71,6 +82,7 @@ function renderMissionDetail(detail) {
   const cmdPick = document.getElementById("cmd-pick");
   const modifiers = document.getElementById("detail-modifiers");
   const roles = document.getElementById("detail-roles");
+  const jsonLink = document.getElementById("cmd-json-detail");
 
   if (title) title.textContent = detail.title || "-";
   if (code) code.textContent = detail.code || "-";
@@ -90,6 +102,9 @@ function renderMissionDetail(detail) {
   }
   if (cmdPick) {
     cmdPick.dataset.command = command;
+  }
+  if (jsonLink && detail.code) {
+    jsonLink.href = `/api/mission/${encodeURIComponent(detail.code)}`;
   }
 
   if (modifiers) {
@@ -136,9 +151,11 @@ async function loadMissionDetail(url) {
     const data = await resp.json();
     if (data.ok && data.detail) {
       renderMissionDetail(data.detail);
+      setActionBanner(`Loaded mission ${data.detail.code}.`, "success");
     }
   } catch (err) {
     console.error("Failed to load mission detail", err);
+    setActionBanner(`Failed to load mission detail: ${String(err)}`, "error");
   }
 }
 
@@ -156,6 +173,63 @@ function bindMissionRows() {
   });
 }
 
+function updateVisibleMissionCount() {
+  const rows = Array.from(document.querySelectorAll(".mission-row"));
+  const visible = rows.filter((row) => !row.classList.contains("is-hidden-search"));
+  const counter = document.getElementById("mission-visible-count");
+  const total = document.getElementById("mission-total-count");
+  const summary = document.getElementById("board-summary-text");
+  const emptyState = document.getElementById("client-empty-state");
+  const feedback = document.getElementById("client-filter-feedback");
+
+  if (counter) counter.textContent = String(visible.length);
+  if (total) total.textContent = String(rows.length);
+  if (summary) summary.textContent = `Showing ${visible.length} of ${rows.length} rows on this page.`;
+  if (emptyState) emptyState.classList.toggle("hidden", visible.length > 0);
+  if (feedback) {
+    feedback.textContent = visible.length > 0
+      ? "Quick search is filtering only the current page results."
+      : "No matches on the current page. Clear the quick search or change the filters.";
+  }
+}
+
+function applyMissionSearch() {
+  const input = document.getElementById("mission-search-input");
+  const term = String(input?.value || "").trim().toLowerCase();
+  document.querySelectorAll(".mission-row").forEach((row) => {
+    const hay = row.dataset.search || "";
+    const show = !term || hay.includes(term);
+    row.classList.toggle("is-hidden-search", !show);
+  });
+  updateVisibleMissionCount();
+}
+
+function bindMissionSearch() {
+  const input = document.getElementById("mission-search-input");
+  if (!input) return;
+  input.addEventListener("input", applyMissionSearch);
+  applyMissionSearch();
+}
+
+function bindQuickFilters() {
+  document.querySelectorAll(".quick-filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const type = btn.dataset.filterType;
+      const value = btn.dataset.filterValue || "";
+      if (type === "status") {
+        const select = document.getElementById("status-filter-select");
+        if (select) select.value = value;
+      }
+      if (type === "priority") {
+        const select = document.getElementById("priority-filter-select");
+        if (select) select.value = value;
+      }
+      const form = btn.closest("#mission-board")?.querySelector("form.filters");
+      if (form) form.requestSubmit();
+    });
+  });
+}
+
 async function runAction(endpoint, label, button) {
   const target = document.getElementById("action-result");
   if (!endpoint) return;
@@ -165,6 +239,7 @@ async function runAction(endpoint, label, button) {
     button.textContent = "Working…";
   }
   if (target) target.textContent = `Running ${label || endpoint}...`;
+  setActionBanner(`Running ${label || endpoint}...`, "working");
 
   try {
     const resp = await fetch(endpoint, {
@@ -177,9 +252,11 @@ async function runAction(endpoint, label, button) {
     });
     const data = await resp.json();
     if (target) target.textContent = JSON.stringify(data, null, 2);
+    setActionBanner(data.ok === false ? `Action failed: ${data.message || label}` : `Action completed: ${label}`, data.ok === false ? "error" : "success");
     await refreshStatus();
   } catch (err) {
     if (target) target.textContent = `Action failed\n${String(err)}`;
+    setActionBanner(`Action failed: ${String(err)}`, "error");
   } finally {
     if (button) {
       button.disabled = false;
@@ -199,8 +276,10 @@ async function copyCommand(text) {
   try {
     await navigator.clipboard.writeText(text);
     if (feedback) feedback.textContent = `Copied to clipboard: ${text}`;
+    setActionBanner(`Copied command: ${text}`, "success");
   } catch (err) {
     if (feedback) feedback.textContent = `Copy failed: ${String(err)}`;
+    setActionBanner(`Copy failed: ${String(err)}`, "error");
   }
 }
 
@@ -213,6 +292,8 @@ function bindCopyButtons() {
 document.addEventListener("DOMContentLoaded", () => {
   refreshStatus();
   bindMissionRows();
+  bindMissionSearch();
+  bindQuickFilters();
   bindActionButtons();
   bindCopyButtons();
 
