@@ -132,16 +132,15 @@ def _mode_label() -> str:
 
 def _menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏠 Home", callback_data="g|menu"), InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("📚 Missions", callback_data="g|missions")],
-        [InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui"), InlineKeyboardButton("👥 Team", callback_data="g|team")],
+        [InlineKeyboardButton("🏠 Home", callback_data="g|menu"), InlineKeyboardButton("🎬 Mission", callback_data="g|mission"), InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1")],
+        [InlineKeyboardButton("📚 Missions", callback_data="g|missions"), InlineKeyboardButton("🗂️ Board", callback_data="g|board"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui")],
         [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🤖 Auto Cast", callback_data="g|autocast"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
+        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("👤 Roster UI", callback_data="g|rosterui"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench")],
         [InlineKeyboardButton("🏢 Studio", callback_data="g|studio"), InlineKeyboardButton("🛒 Market", callback_data="g|market"), InlineKeyboardButton("🤝 Clients", callback_data="g|clients")],
-        [InlineKeyboardButton("👤 Roster UI", callback_data="g|rosterui"), InlineKeyboardButton("🪑 Bench", callback_data="g|bench"), InlineKeyboardButton("🏆 Goals", callback_data="g|goals")],
         [InlineKeyboardButton("🎒 Inventory", callback_data="g|inventory"), InlineKeyboardButton("🧩 Gear UI", callback_data="g|gearui"), InlineKeyboardButton("🧰 Gear Shop", callback_data="g|gearshop")],
-        [InlineKeyboardButton("⭐ Rep", callback_data="g|reputation"), InlineKeyboardButton("📜 Log", callback_data="g|log"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
+        [InlineKeyboardButton("🏆 Goals", callback_data="g|goals"), InlineKeyboardButton("⭐ Rep", callback_data="g|reputation"), InlineKeyboardButton("📜 Log", callback_data="g|log")],
         [InlineKeyboardButton("🛌 Rest All", callback_data="g|restall"), InlineKeyboardButton("🔄 Sync DB", callback_data="g|syncdb"), InlineKeyboardButton("🗄️ DB Mission", callback_data="g|dbmission")],
-        [InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday")],
-
+        [InlineKeyboardButton("⏭️ Next Day", callback_data="g|nextday"), InlineKeyboardButton("❓ Help", callback_data="g|help")],
     ])
 
 
@@ -159,6 +158,7 @@ Core controls:
 /menu — main control panel
 /mission — active mission summary
 /missions [status=...] [translator=...] [priority=...] [lang=...] [page=...]
+/missionsui [page] — paged mission browser with inline pick actions
 /pick <code> — load a DB mission
 /board — board snapshot
 /assignui — assign with buttons
@@ -196,7 +196,7 @@ def _home_text(state) -> str:
         f"- Translator: {mission.assigned_translator or '-'}",
         f"- Roles filled: {assigned_roles}/{len(mission.roles)}",
         "",
-        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /rosterui for paged staff browsing.",
+        "Use the buttons below for the fastest flow. Run /help for the full guide. Use /missionsui for paged mission picking and /rosterui for paged staff browsing.",
     ]
     return chr(10).join(lines)
 
@@ -344,34 +344,98 @@ def _top_role_candidates(state, role_name: str, limit: int = 5):
     return ranked[:limit]
 
 
-def _assign_ui_keyboard(state) -> InlineKeyboardMarkup:
+def _paginate_items(items, page: int = 1, per_page: int = 4):
+    total = len(items)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    safe_page = max(1, min(page, total_pages))
+    start = (safe_page - 1) * per_page
+    return items[start:start + per_page], safe_page, total_pages, total
+
+
+def _all_translator_candidates(state):
+    mission = _ensure_bot_mission(state)
+    pool = [member for member in state.roster if member.role_type == "translator"]
+    return sorted(
+        pool,
+        key=lambda member: (_staff_rank_for_translator(member, mission), member.level, member.name.lower()),
+        reverse=True,
+    )
+
+
+def _all_role_candidates(state, role_name: str):
+    mission = _ensure_bot_mission(state)
+    role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
+    if role is None:
+        return []
+    pool = [member for member in state.roster if member.role_type == role.gender]
+    assigned = {member.name for member in assigned_staff_members(state, mission) if member.name != mission.assigned_roles.get(role.role)}
+    return sorted(
+        pool,
+        key=lambda member: (
+            member.name not in assigned,
+            _staff_rank_for_role(member, mission, role),
+            member.level,
+            member.name.lower(),
+        ),
+        reverse=True,
+    )
+
+
+def _selected_mission_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Accept", callback_data="g|accept"), InlineKeyboardButton("🧠 Assign UI", callback_data="g|assignui")],
+        [InlineKeyboardButton("👥 Team", callback_data="g|team"), InlineKeyboardButton("📤 Submit", callback_data="g|submit")],
+        [InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1"), InlineKeyboardButton("🏠 Menu", callback_data="g|menu")],
+    ])
+
+
+def _assign_ui_keyboard(state, tr_page: int = 1, role_page: int = 1) -> InlineKeyboardMarkup:
     mission = _ensure_bot_mission(state)
     rows: list[list[InlineKeyboardButton]] = []
-    tr_candidates = _top_translator_candidates(state, limit=3)
+    tr_candidates, tr_page, tr_pages, _ = _paginate_items(_all_translator_candidates(state), tr_page, per_page=4)
     if tr_candidates:
-        rows.append([
-            InlineKeyboardButton(f"TR {member.name}", callback_data=f"g|settr|{_name_token(member.name)}")
-            for member in tr_candidates[:2]
-        ])
-        if len(tr_candidates) > 2:
+        rows.append([InlineKeyboardButton("📝 Translator picks", callback_data="g|noop")])
+        for idx in range(0, len(tr_candidates), 2):
+            chunk = tr_candidates[idx:idx+2]
             rows.append([
-                InlineKeyboardButton(f"TR {tr_candidates[2].name}", callback_data=f"g|settr|{_name_token(tr_candidates[2].name)}")
+                InlineKeyboardButton(f"TR {member.name}", callback_data=f"g|settr|{_name_token(member.name)}")
+                for member in chunk
             ])
-    role_buttons = [
-        InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}")
-        for role in mission.roles
-    ]
-    for idx in range(0, len(role_buttons), 2):
-        rows.append(role_buttons[idx:idx+2])
+        nav: list[InlineKeyboardButton] = []
+        if tr_page > 1:
+            nav.append(InlineKeyboardButton("⬅️ TR", callback_data=f"g|assignnav|{tr_page-1}|{role_page}"))
+        if tr_page < tr_pages:
+            nav.append(InlineKeyboardButton("TR ➡️", callback_data=f"g|assignnav|{tr_page+1}|{role_page}"))
+        if nav:
+            rows.append(nav)
+
+    role_items, role_page, role_pages, _ = _paginate_items(list(mission.roles), role_page, per_page=4)
+    if role_items:
+        rows.append([InlineKeyboardButton("🎙 Role picks", callback_data="g|noop")])
+        role_buttons = [
+            InlineKeyboardButton(f"🎙 {role.role}", callback_data=f"g|pickrole|{_name_token(role.role)}|1")
+            for role in role_items
+        ]
+        for idx in range(0, len(role_buttons), 2):
+            rows.append(role_buttons[idx:idx+2])
+        nav = []
+        if role_page > 1:
+            nav.append(InlineKeyboardButton("⬅️ Roles", callback_data=f"g|assignnav|{tr_page}|{role_page-1}"))
+        if role_page < role_pages:
+            nav.append(InlineKeyboardButton("Roles ➡️", callback_data=f"g|assignnav|{tr_page}|{role_page+1}"))
+        if nav:
+            rows.append(nav)
+
     rows.append([
         InlineKeyboardButton("👥 Team", callback_data="g|team"),
         InlineKeyboardButton("📤 Submit", callback_data="g|submit"),
     ])
+    rows.append([InlineKeyboardButton("🗃️ Mission UI", callback_data="g|missionsui|1"), InlineKeyboardButton("🏠 Menu", callback_data="g|menu")])
     return InlineKeyboardMarkup(rows)
 
 
-def _role_picker_keyboard(state, role_name: str) -> InlineKeyboardMarkup:
-    candidates = _top_role_candidates(state, role_name, limit=6)
+def _role_picker_keyboard(state, role_name: str, page: int = 1) -> InlineKeyboardMarkup:
+    candidates, page, total_pages, _ = _paginate_items(_all_role_candidates(state, role_name), page, per_page=6)
     rows: list[list[InlineKeyboardButton]] = []
     for idx in range(0, len(candidates), 2):
         chunk = candidates[idx:idx+2]
@@ -379,6 +443,13 @@ def _role_picker_keyboard(state, role_name: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(member.name, callback_data=f"g|setrole|{_name_token(role_name)}|{_name_token(member.name)}")
             for member in chunk
         ])
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|pickrole|{_name_token(role_name)}|{page-1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|pickrole|{_name_token(role_name)}|{page+1}"))
+    if nav:
+        rows.append(nav)
     rows.append([
         InlineKeyboardButton("⬅️ Assign UI", callback_data="g|assignui"),
         InlineKeyboardButton("👥 Team", callback_data="g|team"),
@@ -587,37 +658,45 @@ def _board_text(state) -> str:
     return chr(10).join(chunks)
 
 
-def _assign_ui_text(state) -> str:
+def _assign_ui_text(state, tr_page: int = 1, role_page: int = 1) -> str:
     mission = _ensure_bot_mission(state)
     tr = mission.assigned_translator or "-"
+    _, safe_tr_page, tr_pages, tr_total = _paginate_items(_all_translator_candidates(state), tr_page, per_page=4)
+    _, safe_role_page, role_pages, role_total = _paginate_items(list(mission.roles), role_page, per_page=4)
     lines = [
         f"🧠 Assign panel — {mission.code}",
         mission.title,
         f"Translator: {tr}",
+        f"Translator page {safe_tr_page}/{tr_pages} · candidates {tr_total}",
+        f"Role page {safe_role_page}/{role_pages} · roles {role_total}",
         "Roles:",
     ]
     for role in mission.roles:
         lines.append(f"- {role.role}: {mission.assigned_roles.get(role.role, '-')} ({role.lines} lines)")
     lines.append("")
-    lines.append("Tap translator shortcut atau pilih role untuk calon terbaik.")
+    lines.append("Use the translator and role pages below to browse more candidates.")
     return chr(10).join(lines)
 
 
-def _role_picker_text(state, role_name: str) -> str:
+def _role_picker_text(state, role_name: str, page: int = 1) -> str:
     mission = _ensure_bot_mission(state)
     role = next((item for item in mission.roles if item.role.lower() == role_name.lower()), None)
     if role is None:
         return f"❌ Role {role_name} tak jumpa."
+    candidates, page, total_pages, total = _paginate_items(_all_role_candidates(state, role.role), page, per_page=6)
     lines = [
         f"🎯 Pilih VO untuk {role.role}",
         f"Gender: {role.gender}",
         f"Lines: {role.lines}",
         f"Current: {mission.assigned_roles.get(role.role, '-')}",
+        f"Candidate page {page}/{total_pages} · total {total}",
         "",
-        "Calon teratas:",
+        "Calon pada page ini:",
     ]
-    for member in _top_role_candidates(state, role.role, limit=6):
+    for member in candidates:
         lines.append(f"- {member.name} | power {round(member.power(),1)} | energy {member.energy} | burnout {member.burnout}")
+    if not candidates:
+        lines.append("- Tiada calon yang sesuai")
     return "\n".join(lines)
 
 
@@ -709,6 +788,27 @@ def _parse_missions_callback(payload: str) -> tuple[Optional[str], Optional[str]
     return status, translator, priority, lang, page
 
 
+def _missions_ui_text(payload: dict[str, object]) -> str:
+    items = list(payload.get("items", []))
+    page = int(payload.get("page", 1) or 1)
+    total_pages = int(payload.get("total_pages", 1) or 1)
+    total = int(payload.get("total", len(items)) or 0)
+    lines = [
+        "🗃️ Mission browser",
+        f"Page {page}/{max(1, total_pages)} · Total {total}",
+        "Tap a mission button to load it instantly into the game state.",
+        "",
+    ]
+    if not items:
+        lines.append("- No missions available for this page.")
+    for item in items:
+        lines.append(
+            f"- {item['code']} | {item['title']}" + chr(10) +
+            f"  {item.get('lang', '-')} | {item.get('priority', '-')} | {item.get('status', '-')} | TR: {item.get('translator') or '-'}"
+        )
+    return chr(10).join(lines)
+
+
 def _mission_pick_keyboard(
     items: list[dict],
     page: int = 1,
@@ -734,7 +834,31 @@ def _mission_pick_keyboard(
         nav.append(InlineKeyboardButton("Next ➡️", callback_data=_missions_callback_payload(page + 1, status, translator, priority, lang)))
     if nav:
         rows.append(nav)
-    rows.append([InlineKeyboardButton("⬅️ Menu", callback_data="g|mission")])
+    rows.append([InlineKeyboardButton("🗃️ Mission UI", callback_data=f"g|missionsui|{page}"), InlineKeyboardButton("⬅️ Menu", callback_data="g|mission")])
+    return InlineKeyboardMarkup(rows)
+
+
+
+def _missions_ui_keyboard(payload: dict[str, object]) -> InlineKeyboardMarkup:
+    items = list(payload.get("items", []))
+    page = int(payload.get("page", 1) or 1)
+    total_pages = int(payload.get("total_pages", 1) or 1)
+    rows: list[list[InlineKeyboardButton]] = []
+    for item in items[:6]:
+        code = str(item["code"])
+        title = str(item["title"])
+        label = f"🎯 {code}"
+        if len(title) <= 20:
+            label += f" · {title}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"g|pick|{code}")])
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"g|missionsui|{page-1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"g|missionsui|{page+1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("📚 Text list", callback_data=f"g|missions|p={page}"), InlineKeyboardButton("🏠 Menu", callback_data="g|menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -809,7 +933,7 @@ async def cmd_mission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
     _save(state)
-    await update.effective_message.reply_text(mission_summary(mission), reply_markup=_menu())
+    await update.effective_message.reply_text(mission_summary(mission), reply_markup=_selected_mission_keyboard())
 
 
 async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -823,7 +947,7 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as exc:
         text = f"❌ DB mission gagal load: {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    await update.effective_message.reply_text(text, reply_markup=_selected_mission_keyboard() if not text.startswith("❌") and code else _menu())
 
 
 async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -867,6 +991,39 @@ async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(text, reply_markup=markup)
 
 
+async def cmd_missionsui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state = _load_or_create(update.effective_user.id)
+    try:
+        page = max(1, int((context.args or ["1"])[0]))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        if GAME_USE_DB:
+            payload = list_db_missions(state, limit=6, page=page, include_meta=True)
+        else:
+            mission = _ensure_bot_mission(state)
+            payload = {
+                "items": [{
+                    "code": mission.code,
+                    "title": mission.title,
+                    "lang": mission.lang,
+                    "priority": mission.priority,
+                    "status": "ACTIVE",
+                    "translator": mission.assigned_translator or "-",
+                }],
+                "page": 1,
+                "total_pages": 1,
+                "total": 1,
+            }
+        text = _missions_ui_text(payload)
+        markup = _missions_ui_keyboard(payload)
+    except Exception as exc:
+        text = f"❌ Tak dapat buka mission browser: {exc}"
+        markup = _menu()
+    _save(state)
+    await update.effective_message.reply_text(text, reply_markup=markup)
+
+
 async def cmd_board(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = _load_or_create(update.effective_user.id)
     _ensure_bot_mission(state)
@@ -878,7 +1035,7 @@ async def cmd_assignui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     state = _load_or_create(update.effective_user.id)
     _ensure_bot_mission(state)
     _save(state)
-    await update.effective_message.reply_text(_assign_ui_text(state), reply_markup=_assign_ui_keyboard(state))
+    await update.effective_message.reply_text(_assign_ui_text(state), reply_markup=_assign_ui_keyboard(state, tr_page=1, role_page=1))
 
 
 async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -896,7 +1053,8 @@ async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as exc:
             text = f"❌ Pick mission gagal: {exc}"
     _save(state)
-    await update.effective_message.reply_text(text, reply_markup=_menu())
+    picked_ok = bool(code) and not text.startswith("❌") and not text.startswith("Usage:")
+    await update.effective_message.reply_text(text, reply_markup=_selected_mission_keyboard() if picked_ok else _menu())
 
 
 async def cmd_syncdb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1353,8 +1511,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         state = _load_or_create(update.effective_user.id)
         _ensure_bot_mission(state)
         role_name = _name_from_token(parts[2])
+        try:
+            page = max(1, int(parts[3])) if len(parts) >= 4 else 1
+        except ValueError:
+            page = 1
         _save(state)
-        await update.effective_message.reply_text(_role_picker_text(state, role_name), reply_markup=_role_picker_keyboard(state, role_name))
+        await update.effective_message.reply_text(_role_picker_text(state, role_name, page=page), reply_markup=_role_picker_keyboard(state, role_name, page=page))
+        return
+
+    if len(parts) >= 4 and parts[1] == "assignnav":
+        state = _load_or_create(update.effective_user.id)
+        _ensure_bot_mission(state)
+        try:
+            tr_page = max(1, int(parts[2]))
+        except ValueError:
+            tr_page = 1
+        try:
+            role_page = max(1, int(parts[3]))
+        except ValueError:
+            role_page = 1
+        _save(state)
+        await update.effective_message.reply_text(_assign_ui_text(state, tr_page=tr_page, role_page=role_page), reply_markup=_assign_ui_keyboard(state, tr_page=tr_page, role_page=role_page))
         return
 
     if len(parts) >= 4 and parts[1] == "setrole":
@@ -1401,6 +1578,39 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             text = f"❌ {exc}"
         _save(state)
         markup = _staff_action_keyboard(state, staff_name) if not text.startswith('❌') else _gear_ui_keyboard(state)
+        await update.effective_message.reply_text(text, reply_markup=markup)
+        return
+
+    if len(parts) >= 3 and parts[1] == "missionsui":
+        state = _load_or_create(update.effective_user.id)
+        try:
+            page = max(1, int(parts[2]))
+        except ValueError:
+            page = 1
+        try:
+            if GAME_USE_DB:
+                payload = list_db_missions(state, limit=6, page=page, include_meta=True)
+            else:
+                mission = _ensure_bot_mission(state)
+                payload = {
+                    "items": [{
+                        "code": mission.code,
+                        "title": mission.title,
+                        "lang": mission.lang,
+                        "priority": mission.priority,
+                        "status": "ACTIVE",
+                        "translator": mission.assigned_translator or "-",
+                    }],
+                    "page": 1,
+                    "total_pages": 1,
+                    "total": 1,
+                }
+            text = _missions_ui_text(payload)
+            markup = _missions_ui_keyboard(payload)
+        except Exception as exc:
+            text = f"❌ Tak dapat buka mission browser: {exc}"
+            markup = _menu()
+        _save(state)
         await update.effective_message.reply_text(text, reply_markup=markup)
         return
 
@@ -1502,6 +1712,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "mission": cmd_mission,
         "dbmission": cmd_dbmission,
         "missions": cmd_missions,
+        "missionsui": cmd_missionsui,
         "board": cmd_board,
         "assignui": cmd_assignui,
         "syncdb": cmd_syncdb,
@@ -1544,6 +1755,7 @@ def build_game_app(token: Optional[str] = None) -> Application:
     app.add_handler(CommandHandler("mission", cmd_mission))
     app.add_handler(CommandHandler("dbmission", cmd_dbmission))
     app.add_handler(CommandHandler("missions", cmd_missions))
+    app.add_handler(CommandHandler("missionsui", cmd_missionsui))
     app.add_handler(CommandHandler("board", cmd_board))
     app.add_handler(CommandHandler("assignui", cmd_assignui))
     app.add_handler(CommandHandler("pick", cmd_pick))

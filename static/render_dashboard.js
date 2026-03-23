@@ -66,6 +66,17 @@ function setMissionRowActive(code) {
   if (selected) selected.textContent = code || "-";
 }
 
+function buildMissionWorkflow(detail) {
+  const code = detail?.code || "<movie_code>";
+  return [
+    `/pick ${code}`,
+    "/accept",
+    "/assignui",
+    "/team",
+    "/submit",
+  ].join("\n");
+}
+
 function renderMissionDetail(detail) {
   if (!detail) return;
   const title = document.getElementById("detail-title");
@@ -83,6 +94,12 @@ function renderMissionDetail(detail) {
   const modifiers = document.getElementById("detail-modifiers");
   const roles = document.getElementById("detail-roles");
   const jsonLink = document.getElementById("cmd-json-detail");
+  const cmdAccept = document.getElementById("cmd-accept");
+  const cmdAssign = document.getElementById("cmd-assignui");
+  const cmdTeam = document.getElementById("cmd-team");
+  const cmdSubmit = document.getElementById("cmd-submit");
+  const cmdCopyWorkflow = document.getElementById("cmd-copy-workflow");
+  const workflowScript = document.getElementById("workflow-script");
 
   if (title) title.textContent = detail.title || "-";
   if (code) code.textContent = detail.code || "-";
@@ -103,6 +120,13 @@ function renderMissionDetail(detail) {
   if (cmdPick) {
     cmdPick.dataset.command = command;
   }
+  if (cmdAccept) cmdAccept.dataset.command = "/accept";
+  if (cmdAssign) cmdAssign.dataset.command = "/assignui";
+  if (cmdTeam) cmdTeam.dataset.command = "/team";
+  if (cmdSubmit) cmdSubmit.dataset.command = "/submit";
+  const workflowText = buildMissionWorkflow(detail);
+  if (cmdCopyWorkflow) cmdCopyWorkflow.dataset.command = workflowText;
+  if (workflowScript) workflowScript.textContent = workflowText;
   if (jsonLink && detail.code) {
     jsonLink.href = `/api/mission/${encodeURIComponent(detail.code)}`;
   }

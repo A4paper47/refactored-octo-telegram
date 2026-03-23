@@ -711,3 +711,61 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+
+.workflow-section {
+  background: linear-gradient(180deg, rgba(118, 184, 255, 0.06), rgba(82, 217, 166, 0.03));
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  border: 1px solid var(--line);
+}
+
+.workflow-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.workflow-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+}
+
+.workflow-step > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #08111e;
+  background: linear-gradient(135deg, rgba(118, 184, 255, 0.95), rgba(82, 217, 166, 0.95));
+}
+
+.workflow-step strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.workflow-command {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  margin-top: 2px;
+}
+
+#workflow-script {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(6, 12, 24, 0.78);
+  border: 1px solid var(--line);
+  color: #dce8ff;
+  overflow-x: auto;
+}

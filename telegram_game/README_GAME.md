@@ -1,43 +1,31 @@
-# Telegram UI Notes — v15 Professional Interface Refresh
+# Telegram UI Notes — v17 Mission Workflow Update
 
 ## Main improvements
 
-- improved home panel copy for better readability
-- rewrote `/help` into a clearer command guide
-- polished `/missions` empty-state and filter wording
-- kept the inline gear flow from v14
-- kept the inline assign flow and command deck gameplay loop
+- added `/missionsui [page]` for a paged mission browser
+- selected mission replies now open with a faster action keyboard
+- assign UI now supports pagination for translator picks and role pages
+- role picker now supports candidate pagination
+- website mission detail now generates a Telegram-ready workflow block
 
 ## Recommended flow
 
 ```text
 /start
 /menu
-/missions
+/missionsui
 /pick BN-260320-01
 /accept
 /assignui
 /team
 /submit
 /gearui
-/staff Alya
-/train Alya skill
-/rest Alya
+/rosterui
 ```
 
-## Button layout
+## Button layout highlights
 
-- Home / Mission / Missions
-- Board / Assign UI / Team
-- Accept / Auto Cast / Submit
-- Studio / Market / Clients
-- Roster / Bench / Goals
-- Inventory / Gear UI / Gear Shop
-- Rep / Log / Help
-- Rest All / Sync DB / DB Mission
-- Next Day
-
-
-### v16 UI updates
-- `/rosterui [page]` opens a paged roster browser with direct staff-card buttons
-- Dashboard now supports quick mission search and quick status/priority filters
+- Mission UI for paged mission selection
+- Assign UI with translator and role pages
+- Roster UI for staff browsing
+- Gear UI for equipment and training loop

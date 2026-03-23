@@ -66,8 +66,9 @@
           <div class="section-title">Telegram workflow</div>
           <ul class="plain-list muted compact-list">
             <li><code>/menu</code> for the main control panel</li>
-            <li><code>/missions</code> or <code>/board</code> to review available work</li>
+            <li><code>/missionsui</code>, <code>/missions</code>, or <code>/board</code> to review available work</li>
             <li><code>/assignui</code>, <code>/team</code>, and <code>/submit</code> for active mission flow</li>
+            <li><code>/missionsui</code> and paged assign buttons reduce typing during testing</li>
             <li><code>/rosterui</code>, <code>/staff</code>, and <code>/gearui</code> for staff progression</li>
           </ul>
         </section>
@@ -82,9 +83,9 @@
     <main class="content">
       <section class="hero card" id="overview">
         <div class="hero-copy">
-          <div class="eyebrow">Operations Dashboard v16</div>
+          <div class="eyebrow">Operations Dashboard v17</div>
           <h2>Interactive mission operations with live search, fast webhook actions, and cleaner production-facing UI.</h2>
-          <p class="muted">This version improves dashboard usability with client-side mission search, quick filters, clearer summaries, and smoother action feedback while keeping the Telegram game workflow front and centre.</p>
+          <p class="muted">This version adds Telegram-ready mission workflow panels, a sharper action deck, and richer inline game navigation while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
           <div class="pill-row wrap-row hero-meta">
             <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
@@ -360,13 +361,37 @@
             <div class="detail-section">
               <div class="section-title">Command deck</div>
               <div class="command-grid">
-                <button class="btn copy-command-btn" type="button" id="cmd-pick" data-command="/pick {{ mission_detail.code if mission_detail else '-' }}">Copy /pick</button>
-                <button class="btn copy-command-btn" type="button" id="cmd-assignui" data-command="/assignui">Copy /assignui</button>
-                <button class="btn copy-command-btn" type="button" id="cmd-team" data-command="/team">Copy /team</button>
-                <button class="btn copy-command-btn" type="button" id="cmd-submit" data-command="/submit">Copy /submit</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-pick" data-command="{{ mission_workflow.commands.pick }}">Copy /pick</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-accept" data-command="{{ mission_workflow.commands.accept }}">Copy /accept</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-assignui" data-command="{{ mission_workflow.commands.assignui }}">Copy /assignui</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-team" data-command="{{ mission_workflow.commands.team }}">Copy /team</button>
+                <button class="btn copy-command-btn" type="button" id="cmd-submit" data-command="{{ mission_workflow.commands.submit }}">Copy /submit</button>
                 <a class="btn" id="cmd-json-detail" href="{{ api_mission_detail_base.replace('__CODE__', mission_detail.code if mission_detail else '__CODE__') }}">Open detail JSON</a>
               </div>
               <div class="tiny muted" id="copy-feedback">Use the command deck to copy Telegram actions for the selected mission.</div>
+            </div>
+
+            <div class="detail-section workflow-section">
+              <div class="row space-between wrap-row gap-md">
+                <div>
+                  <div class="section-title">Telegram workflow panel</div>
+                  <p class="muted">Mission-ready command sequence generated from the selected mission for faster operator testing.</p>
+                </div>
+                <button class="btn btn-primary copy-command-btn" type="button" id="cmd-copy-workflow" data-command="{{ mission_workflow.workflow_text }}">Copy full flow</button>
+              </div>
+              <div class="workflow-grid">
+                {% for step in mission_workflow.steps %}
+                <div class="workflow-step">
+                  <span>{{ loop.index }}</span>
+                  <div>
+                    <strong>{{ step.label }}</strong>
+                    <button class="workflow-command copy-command-btn" type="button" data-command="{{ step.command }}">{{ step.command }}</button>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              <pre id="workflow-script">{{ mission_workflow.workflow_text }}</pre>
+              <div class="tiny muted">Generated from the selected mission code and refreshed live when you click a new mission row.</div>
             </div>
 
             <div class="detail-section">
@@ -449,6 +474,7 @@
     window.DASHBOARD_ACTION_SETUP = "{{ api_action_setup_path }}";
     window.DASHBOARD_ACTION_DELETE = "{{ api_action_delete_path }}";
     window.DASHBOARD_ACTION_INFO = "{{ api_action_info_path }}";
+    window.DASHBOARD_API_WORKFLOW_BASE = "{{ api_mission_workflow_base }}";
   </script>
   <script src="{{ url_for('static', filename='render_dashboard.js') }}"></script>
 </body>

@@ -337,6 +337,33 @@ def _dashboard_detail(board: Optional[dict[str, Any]] = None) -> Optional[dict[s
         return None
 
 
+def _mission_workflow_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any]:
+    code = (detail or {}).get("code") or "<movie_code>"
+    commands = {
+        "pick": f"/pick {code}",
+        "accept": "/accept",
+        "assignui": "/assignui",
+        "team": "/team",
+        "submit": "/submit",
+        "gearui": "/gearui",
+        "missionsui": "/missionsui",
+    }
+    steps = [
+        {"label": "Load mission", "command": commands["pick"]},
+        {"label": "Accept mission", "command": commands["accept"]},
+        {"label": "Open assign UI", "command": commands["assignui"]},
+        {"label": "Review team", "command": commands["team"]},
+        {"label": "Submit QA", "command": commands["submit"]},
+    ]
+    workflow_text = "\n".join(step["command"] for step in steps)
+    return {
+        "code": code,
+        "commands": commands,
+        "steps": steps,
+        "workflow_text": workflow_text,
+    }
+
+
 def _manifest_payload() -> dict[str, Any]:
     total_kept = sum(len(items) for items in RUNTIME_FILE_GROUPS.values())
     total_removed = sum(len(items) for items in REMOVED_FILE_GROUPS.values())
@@ -417,6 +444,7 @@ def dashboard():
         manifest=_manifest_payload(),
         selected_code=_selected_code(),
         mission_detail=detail,
+        mission_workflow=_mission_workflow_payload(detail),
         setup_path=url_for("setup_webhook_route"),
         webhook_info_path=url_for("webhook_info_route"),
         delete_webhook_path=url_for("delete_webhook_route"),
@@ -424,6 +452,7 @@ def dashboard():
         api_missions_path=url_for("api_missions"),
         api_manifest_path=url_for("api_manifest"),
         api_mission_detail_base=url_for("api_mission_detail", movie_code="__CODE__"),
+        api_mission_workflow_base=url_for("api_mission_workflow", movie_code="__CODE__"),
         api_action_setup_path=url_for("api_action_setup_webhook"),
         api_action_delete_path=url_for("api_action_delete_webhook"),
         api_action_info_path=url_for("api_action_webhook_info"),
@@ -459,6 +488,20 @@ def api_mission_detail(movie_code: str):
     if detail is None:
         return jsonify({"ok": False, "message": "Mission not found"}), 404
     return jsonify({"ok": True, "detail": detail})
+
+
+@app.route("/api/mission/<movie_code>/workflow")
+def api_mission_workflow(movie_code: str):
+    detail = {"code": movie_code}
+    if GAME_USE_DB and DATABASE_URL:
+        try:
+            state = new_game(user_id=0, studio_name="Render Dashboard")
+            db_detail = get_db_mission_detail(state, movie_code)
+            if db_detail:
+                detail = db_detail
+        except Exception as exc:  # pragma: no cover
+            return jsonify({"ok": False, "message": str(exc)}), 500
+    return jsonify({"ok": True, "workflow": _mission_workflow_payload(detail)})
 
 
 @app.route("/api/actions/setup-webhook", methods=["POST"])

@@ -1,19 +1,16 @@
-# Studio Dub Tycoon — Render Web Service Edition (v15)
+# Studio Dub Tycoon — Render Web Service Edition (v17)
 
 This is the cleaned deployment package for the Telegram + web dashboard version of Studio Dub Tycoon.
 
-## What changed in v15
+## What changed in v17
 
-- refreshed the website dashboard into a more professional operations layout
-- improved hierarchy, spacing, labels, and empty states across the dashboard
-- reorganised the sidebar into operations, API, webhook, and Telegram workflow sections
-- polished the mission board, action center, live status console, and mission detail panel
-- refined Telegram text for:
-  - `/menu`
-  - `/help`
-  - `/missions`
-  - home panel wording
-- updated build id to `20260323-v15-professional-dashboard-ui`
+- added a Telegram-ready mission workflow panel to the website dashboard
+- added a generated command sequence for the selected mission
+- improved the website mission detail area with richer action flow
+- added `/missionsui [page]` for a paged mission browser inside Telegram
+- added paged inline assign UI for translator and role selection
+- kept live mission search, action center controls, and roster UI from v16
+- updated build id to `20260323-v17-mission-workflow-ui`
 
 ## What is inside
 
@@ -58,6 +55,7 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/api/status`
 - `/api/missions`
 - `/api/mission/<movie_code>`
+- `/api/mission/<movie_code>/workflow`
 - `/api/manifest`
 - `/api/actions/setup-webhook`
 - `/api/actions/webhook-info`
@@ -73,6 +71,7 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/help`
 - `/mission`
 - `/missions`
+- `/missionsui`
 - `/board`
 - `/assignui`
 - `/accept`
@@ -81,6 +80,7 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 - `/team`
 - `/bench`
 - `/roster`
+- `/rosterui <page>`
 - `/staff <name>`
 - `/inventory`
 - `/gearshop`
@@ -108,9 +108,3 @@ sh -c 'gunicorn render_game_web:app --bind 0.0.0.0:${PORT:-10000} --workers ${WE
 pytest -q
 python -m py_compile telegram_game/*.py render_game_web.py
 ```
-
-
-## v16 highlights
-- Live mission search and quick filters on the Render dashboard
-- Cleaner action feedback and selected-mission insight cards
-- Telegram `/rosterui` paged staff browser for faster game navigation
