@@ -83,9 +83,9 @@
     <main class="content">
       <section class="hero card" id="overview">
         <div class="hero-copy">
-          <div class="eyebrow">Operations Dashboard v18</div>
+          <div class="eyebrow">Operations Dashboard v21</div>
           <h2>Interactive mission operations with live search, fast webhook actions, and cleaner production-facing UI.</h2>
-          <p class="muted">This version adds live simulator action decks, preset-driven assign recommendations, and a more operator-friendly workflow deck while keeping live dashboard search, board insights, and webhook controls front and centre.</p>
+          <p class="muted">This version adds roster-backed quick actions, richer mission detail tooling, and more operator-friendly dashboard copy while keeping live search, simulator controls, and webhook actions front and centre.</p>
           <div class="pill-row wrap-row hero-meta">
             <span class="pill">Service {{ service.service }}</span>
             <span class="pill">Webhook {{ service.webhook_path }}</span>
@@ -428,6 +428,79 @@
             </div>
 
 
+            <div class="detail-section" id="mission-quick-actions-card">
+              <div class="row space-between wrap-row gap-md">
+                <div>
+                  <div class="section-title">Roster-backed quick actions</div>
+                  <p class="muted">These suggestions use the synced roster and selected mission to generate faster assign commands for Telegram testing.</p>
+                </div>
+                <button class="btn copy-command-btn" type="button" id="cmd-copy-quick-translator" data-command="{{ mission_quick_actions.translator.recommended.command if mission_quick_actions.translator.recommended else mission_quick_actions.translator.template }}">Copy recommended translator</button>
+              </div>
+              <div class="detail-item"><span>Operator summary</span><strong id="quick-actions-summary">{{ mission_quick_actions.summary }}</strong></div>
+              <div class="quick-actions-grid">
+                <div class="detail-section no-pad">
+                  <div class="section-title">Translator recommendations</div>
+                  <div class="quick-action-list" id="quick-translator-options">
+                    {% if mission_quick_actions.translator.recommended %}
+                    <div class="template-item">
+                      <div>
+                        <strong>{{ mission_quick_actions.translator.recommended.name }}</strong>
+                        <div class="muted tiny">Recommended · {{ mission_quick_actions.translator.recommended.meta }}</div>
+                      </div>
+                      <div class="row gap-sm wrap-row">
+                        <button class="btn btn-primary copy-command-btn" type="button" data-command="{{ mission_quick_actions.translator.recommended.command }}">Recommended</button>
+                      </div>
+                    </div>
+                    {% endif %}
+                    {% for item in mission_quick_actions.translator.alternatives %}
+                    <div class="template-item">
+                      <div>
+                        <strong>{{ item.name }}</strong>
+                        <div class="muted tiny">Alternative · {{ item.meta }}</div>
+                      </div>
+                      <div class="row gap-sm wrap-row">
+                        <button class="btn copy-command-btn" type="button" data-command="{{ item.command }}">Copy</button>
+                      </div>
+                    </div>
+                    {% else %}
+                      {% if not mission_quick_actions.translator.recommended %}
+                      <div class="muted">No translator suggestions yet.</div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                </div>
+                <div class="detail-section no-pad">
+                  <div class="section-title">Role recommendations</div>
+                  <div class="quick-role-list" id="quick-role-options">
+                    {% for role in mission_quick_actions.roles %}
+                    <div class="quick-role-card">
+                      <div class="row space-between wrap-row gap-sm">
+                        <div>
+                          <strong>{{ role.role }}</strong>
+                          <div class="muted tiny">{{ role.gender|upper }}{% if role.current and role.current != '-' %} · current {{ role.current }}{% endif %}</div>
+                        </div>
+                        {% if role.recommended %}
+                        <button class="btn btn-primary copy-command-btn" type="button" data-command="{{ role.recommended.command }}">{{ role.recommended.name }}</button>
+                        {% else %}
+                        <button class="btn copy-command-btn" type="button" data-command="{{ role.template }}">Template</button>
+                        {% endif %}
+                      </div>
+                      <div class="chip-row">
+                        {% if role.recommended %}
+                        <span class="chip">{{ role.recommended.meta }}</span>
+                        {% endif %}
+                        <button class="btn btn-ghost copy-command-btn" type="button" data-command="{{ role.template }}">Blank template</button>
+                      </div>
+                    </div>
+                    {% else %}
+                    <div class="muted">Role recommendations appear after selecting a DB-backed mission.</div>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+
             <div class="detail-section" id="mission-simulator-card">
               <div class="row space-between wrap-row gap-md">
                 <div>
@@ -591,6 +664,7 @@
     window.DASHBOARD_ACTION_INFO = "{{ api_action_info_path }}";
     window.DASHBOARD_API_WORKFLOW_BASE = "{{ api_mission_workflow_base }}";
     window.DASHBOARD_API_SIMULATE_BASE = "{{ api_mission_simulate_base }}";
+    window.DASHBOARD_API_QUICK_ACTIONS_BASE = "{{ api_mission_quick_actions_base }}";
   </script>
   <script src="{{ url_for('static', filename='render_dashboard.js') }}"></script>
 </body>

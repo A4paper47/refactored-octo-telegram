@@ -11,7 +11,14 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from telegram import Update
 
 from db import init_db
-from telegram_game.db_integration import count_db_movie_candidates, list_db_missions, get_db_board_snapshot, get_db_mission_detail
+from telegram_game.db_integration import (
+    build_mission_from_movie_code,
+    count_db_movie_candidates,
+    get_db_board_snapshot,
+    get_db_mission_detail,
+    list_db_missions,
+    sync_state_with_db,
+)
 from telegram_game.game_engine import new_game
 from telegram_game.telegram_studio_game_bot import build_game_application
 from version import APP_VERSION, BUILD_ID
@@ -386,6 +393,143 @@ def _mission_workflow_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any
     }
 
 
+
+
+def _recommend_roster_quick_actions(detail: Optional[dict[str, Any]]) -> dict[str, Any]:
+    detail = detail or {}
+    code = str(detail.get("code") or "<movie_code>")
+    translator_template = f"/assigntr {detail.get('translator')}" if detail.get('translator') and detail.get('translator') != '-' else "/assigntr <translator_name>"
+    payload: dict[str, Any] = {
+        "code": code,
+        "summary": "Sync roster suggestions appear when DB-backed staff is available.",
+        "translator": {
+            "recommended": None,
+            "alternatives": [],
+            "template": translator_template,
+        },
+        "roles": [],
+        "available": False,
+    }
+
+    if not (GAME_USE_DB and DATABASE_URL and code and code != "<movie_code>"):
+        return payload
+
+    try:
+        state = new_game(user_id=0, studio_name="Render Quick Actions")
+        sync_state_with_db(state)
+        mission = build_mission_from_movie_code(state, code)
+        if mission is None:
+            payload["summary"] = "Mission not found in DB-backed roster context."
+            return payload
+
+        state.current_mission = mission
+        used_names: set[str] = set()
+
+        def _bonus(member, role_gender: Optional[str] = None) -> float:
+            bonus = 0.0
+            traits = set(getattr(member, 'traits', []) or [])
+            priority = (mission.priority or '').lower()
+            tier = (mission.client_tier or '').lower()
+            if member.role_type == 'translator':
+                if 'polyglot' in traits:
+                    bonus += 14.0
+                if 'perfectionist' in traits and tier in {'broadcast', 'premium', 'enterprise'}:
+                    bonus += 12.0
+                if 'resilient' in traits and priority in {'urgent', 'superurgent'}:
+                    bonus += 10.0
+                if 'workhorse' in traits and priority in {'urgent', 'superurgent'}:
+                    bonus += 9.0
+            else:
+                if 'natural' in traits:
+                    bonus += 12.0
+                if 'charmer' in traits and tier in {'premium', 'enterprise', 'broadcast'}:
+                    bonus += 10.0
+                if 'resilient' in traits and priority in {'urgent', 'superurgent'}:
+                    bonus += 10.0
+                if 'workhorse' in traits and priority in {'urgent', 'superurgent'}:
+                    bonus += 8.0
+                if role_gender and member.role_type == role_gender:
+                    bonus += 6.0
+            if getattr(member, 'equipped', None):
+                bonus += 4.0
+            bonus += max(0.0, (getattr(member, 'energy', 100) - 60) * 0.16)
+            bonus -= max(0.0, getattr(member, 'burnout', 0) * 0.35)
+            return bonus
+
+        def _ranked(role_type: str, limit: int = 3, role_gender: Optional[str] = None):
+            candidates = [m for m in state.roster if m.role_type == role_type and m.name not in used_names]
+            ranked = sorted(
+                candidates,
+                key=lambda member: (member.power() + _bonus(member, role_gender), member.level, member.name.lower()),
+                reverse=True,
+            )
+            return ranked[:limit]
+
+        if mission.assigned_translator and mission.assigned_translator != '-':
+            tr_name = str(mission.assigned_translator)
+            recommended_tr = next((m for m in state.roster if m.role_type == 'translator' and m.name == tr_name), None)
+        else:
+            ranked_tr = _ranked('translator', limit=1)
+            recommended_tr = ranked_tr[0] if ranked_tr else None
+        if recommended_tr is not None:
+            used_names.add(recommended_tr.name)
+            payload['translator']['recommended'] = {
+                'name': recommended_tr.name,
+                'command': f'/assigntr {recommended_tr.name}',
+                'meta': f"P{int(recommended_tr.power())} · E{recommended_tr.energy} · {recommended_tr.rarity}",
+            }
+        payload['translator']['alternatives'] = [
+            {
+                'name': member.name,
+                'command': f'/assigntr {member.name}',
+                'meta': f"P{int(member.power())} · E{member.energy} · {member.rarity}",
+            }
+            for member in _ranked('translator', limit=3)
+        ]
+
+        for role in mission.roles:
+            role_gender = 'male' if (role.gender or '').lower().startswith('m') else 'female'
+            current_name = mission.assigned_roles.get(role.role) or None
+            if current_name:
+                recommended_member = next((m for m in state.roster if m.role_type == role_gender and m.name == current_name), None)
+            else:
+                ranked_role = _ranked(role_gender, limit=1, role_gender=role_gender)
+                recommended_member = ranked_role[0] if ranked_role else None
+            if recommended_member is not None:
+                used_names.add(recommended_member.name)
+            alternatives = _ranked(role_gender, limit=3, role_gender=role_gender)
+            payload['roles'].append({
+                'role': role.role,
+                'gender': role_gender,
+                'current': current_name or '-',
+                'recommended': {
+                    'name': recommended_member.name,
+                    'command': f'/assign {role.role} {recommended_member.name}',
+                    'meta': f"P{int(recommended_member.power())} · E{recommended_member.energy} · {recommended_member.rarity}",
+                } if recommended_member is not None else None,
+                'template': f'/assign {role.role} <{role_gender}_staff_name>',
+                'alternatives': [
+                    {
+                        'name': member.name,
+                        'command': f'/assign {role.role} {member.name}',
+                        'meta': f"P{int(member.power())} · E{member.energy} · {member.rarity}",
+                    }
+                    for member in alternatives
+                ],
+            })
+
+        payload['available'] = True
+        translator_name = payload['translator'].get('recommended', {}).get('name') if isinstance(payload['translator'], dict) else None
+        payload['summary'] = (
+            f"Roster-backed quick actions ready for {code}. "
+            f"Recommended translator: {translator_name or '-'} · role suggestions: {len(payload['roles'])}."
+        )
+        return payload
+    except Exception as exc:
+        payload['summary'] = f"Roster-backed suggestions unavailable: {exc}"
+        return payload
+
+
 def _mission_simulator_payload(detail: Optional[dict[str, Any]]) -> dict[str, Any]:
     detail = detail or {}
     code = detail.get("code") or "<movie_code>"
@@ -550,6 +694,7 @@ def dashboard():
         selected_code=_selected_code(),
         mission_detail=detail,
         mission_workflow=_mission_workflow_payload(detail),
+        mission_quick_actions=_recommend_roster_quick_actions(detail),
         mission_simulation=_mission_simulator_payload(detail),
         setup_path=url_for("setup_webhook_route"),
         webhook_info_path=url_for("webhook_info_route"),
@@ -560,6 +705,7 @@ def dashboard():
         api_mission_detail_base=url_for("api_mission_detail", movie_code="__CODE__"),
         api_mission_workflow_base=url_for("api_mission_workflow", movie_code="__CODE__"),
         api_mission_simulate_base=url_for("api_mission_simulate", movie_code="__CODE__"),
+        api_mission_quick_actions_base=url_for("api_mission_quick_actions", movie_code="__CODE__"),
         api_action_setup_path=url_for("api_action_setup_webhook"),
         api_action_delete_path=url_for("api_action_delete_webhook"),
         api_action_info_path=url_for("api_action_webhook_info"),
@@ -623,6 +769,20 @@ def api_mission_workflow(movie_code: str):
         except Exception as exc:  # pragma: no cover
             return jsonify({"ok": False, "message": str(exc)}), 500
     return jsonify({"ok": True, "workflow": _mission_workflow_payload(detail)})
+
+
+@app.route("/api/mission/<movie_code>/quick-actions")
+def api_mission_quick_actions(movie_code: str):
+    detail = {"code": movie_code}
+    if GAME_USE_DB and DATABASE_URL:
+        try:
+            state = new_game(user_id=0, studio_name="Render Dashboard")
+            db_detail = get_db_mission_detail(state, movie_code)
+            if db_detail:
+                detail = db_detail
+        except Exception as exc:  # pragma: no cover
+            return jsonify({"ok": False, "message": str(exc)}), 500
+    return jsonify({"ok": True, "quick_actions": _recommend_roster_quick_actions(detail)})
 
 
 @app.route("/api/actions/setup-webhook", methods=["POST"])

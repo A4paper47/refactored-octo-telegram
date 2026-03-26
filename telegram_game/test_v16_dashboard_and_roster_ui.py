@@ -81,7 +81,7 @@ def test_dashboard_v16_contains_quick_search_and_action_banner(monkeypatch):
     assert resp.status_code == 200
     assert "Quick search" in body
     assert "action-banner" in body
-    assert "Operations Dashboard v18" in body
+    assert "Operations Dashboard v" in body
 
 
 def test_missionsui_command_shows_paged_browser(monkeypatch):

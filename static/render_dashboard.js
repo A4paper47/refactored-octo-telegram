@@ -249,6 +249,109 @@ function renderMissionSimulation(simulation) {
   bindCopyButtons();
 }
 
+function renderQuickActions(payload) {
+  if (!payload) return;
+  const summary = document.getElementById("quick-actions-summary");
+  const translatorList = document.getElementById("quick-translator-options");
+  const roleList = document.getElementById("quick-role-options");
+  const copyTranslatorBtn = document.getElementById("cmd-copy-quick-translator");
+
+  if (summary) summary.textContent = payload.summary || "-";
+
+  if (copyTranslatorBtn) {
+    const cmd = payload?.translator?.recommended?.command || payload?.translator?.template || "/assigntr <translator_name>";
+    copyTranslatorBtn.dataset.command = cmd;
+  }
+
+  if (translatorList) {
+    translatorList.innerHTML = "";
+    const recommended = payload?.translator?.recommended || null;
+    const alternatives = Array.isArray(payload?.translator?.alternatives) ? payload.translator.alternatives : [];
+    if (!recommended && !alternatives.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "No translator suggestions yet.";
+      translatorList.appendChild(empty);
+    }
+    if (recommended) {
+      const card = document.createElement("div");
+      card.className = "template-item";
+      card.innerHTML = `
+        <div>
+          <strong>${recommended.name}</strong>
+          <div class="muted tiny">Recommended · ${recommended.meta || ""}</div>
+        </div>
+        <div class="row gap-sm wrap-row">
+          <button class="btn btn-primary copy-command-btn" type="button" data-command="${recommended.command}">Recommended</button>
+        </div>`;
+      translatorList.appendChild(card);
+    }
+    alternatives.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "template-item";
+      card.innerHTML = `
+        <div>
+          <strong>${item.name}</strong>
+          <div class="muted tiny">Alternative · ${item.meta || ""}</div>
+        </div>
+        <div class="row gap-sm wrap-row">
+          <button class="btn copy-command-btn" type="button" data-command="${item.command}">Copy</button>
+        </div>`;
+      translatorList.appendChild(card);
+    });
+  }
+
+  if (roleList) {
+    roleList.innerHTML = "";
+    const roles = Array.isArray(payload?.roles) ? payload.roles : [];
+    if (!roles.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Role recommendations appear after selecting a DB-backed mission.";
+      roleList.appendChild(empty);
+    }
+    roles.forEach((role) => {
+      const card = document.createElement("div");
+      card.className = "quick-role-card";
+      const command = role?.recommended?.command || role?.template || "";
+      const label = role?.recommended?.name || "Template";
+      const meta = role?.recommended?.meta || "";
+      const current = role?.current && role.current !== "-" ? ` · current ${role.current}` : "";
+      card.innerHTML = `
+        <div class="row space-between wrap-row gap-sm">
+          <div>
+            <strong>${role.role}</strong>
+            <div class="muted tiny">${String(role.gender || "staff").toUpperCase()}${current}</div>
+          </div>
+          <button class="btn ${role?.recommended ? "btn-primary" : ""} copy-command-btn" type="button" data-command="${command}">${label}</button>
+        </div>
+        <div class="chip-row">
+          ${meta ? `<span class="chip">${meta}</span>` : ""}
+          <button class="btn btn-ghost copy-command-btn" type="button" data-command="${role.template || ""}">Blank template</button>
+        </div>`;
+      roleList.appendChild(card);
+    });
+  }
+
+  bindCopyButtons();
+}
+
+async function loadMissionQuickActions(code) {
+  const base = window.DASHBOARD_API_QUICK_ACTIONS_BASE;
+  if (!base || !code) return;
+  const url = base.replace("__CODE__", encodeURIComponent(code));
+  try {
+    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    const data = await resp.json();
+    if (data.ok && data.quick_actions) {
+      renderQuickActions(data.quick_actions);
+    }
+  } catch (err) {
+    console.error("Failed to load mission quick actions", err);
+    setActionBanner(`Failed to load quick actions: ${String(err)}`, "error");
+  }
+}
+
 async function loadMissionSimulation(code) {
   const base = window.DASHBOARD_API_SIMULATE_BASE;
   if (!base || !code) return;
@@ -345,7 +448,9 @@ function renderMissionDetail(detail) {
   setMissionRowActive(detail.code);
   bindCopyButtons();
   loadMissionSimulation(detail.code);
+  loadMissionQuickActions(detail.code);
 }
+
 async function loadMissionDetail(url) {
   if (!url) return;
   try {
@@ -536,6 +641,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const existingCode = (document.getElementById("detail-code")?.textContent || "").trim();
   if (existingCode && existingCode !== "-") {
     loadMissionSimulation(existingCode);
+    loadMissionQuickActions(existingCode);
   }
 
   window.setInterval(refreshStatus, 20000);

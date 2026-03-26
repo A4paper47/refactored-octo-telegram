@@ -203,6 +203,43 @@ def _home_text(state) -> str:
     return chr(10).join(lines)
 
 
+def _recommended_preset_hint(mission) -> str:
+    priority = (mission.priority or '').lower()
+    lang = (mission.lang or '').lower()
+    tier = (mission.client_tier or '').lower()
+    modifiers = {str(item).lower() for item in (mission.modifiers or [])}
+    if priority in {'urgent', 'superurgent'} or {'rush_rewrite', 'overnight_push', 'tight_deadline'} & modifiers:
+        return 'workload'
+    if lang not in {'en', 'ms', '-'} or {'glossary_lock', 'localized_terms', 'sub_style_lock'} & modifiers:
+        return 'lang'
+    if tier in {'broadcast', 'premium', 'enterprise'} or {'premium_notes', 'lip_sync_heavy'} & modifiers:
+        return 'trait'
+    return 'recommended'
+
+
+def _mission_card_text(state, mission, heading: str = '🎬 Mission card') -> str:
+    assigned_roles = sum(1 for role in mission.roles if mission.assigned_roles.get(role.role))
+    total_roles = len(mission.roles)
+    translator = mission.assigned_translator or '-'
+    preset_hint = _recommended_preset_hint(mission)
+    modifiers = ', '.join(str(item) for item in (mission.modifiers or [])[:3]) if mission.modifiers else '-'
+    role_preview = []
+    for role in mission.roles[:4]:
+        role_preview.append(f"{role.role}:{mission.assigned_roles.get(role.role) or '-'}")
+    if len(mission.roles) > 4:
+        role_preview.append('…')
+    role_line = ', '.join(role_preview) if role_preview else '-'
+    return "\n".join([
+        heading,
+        f"{mission.code} · {mission.title} ({mission.year})",
+        f"{mission.client_name} [{mission.client_tier}] · {mission.lang.upper()} · {mission.priority} · {mission.source}",
+        f"Reward {mission.reward}c · XP {mission.xp} · Rep +{mission.reputation_reward} · Deadline day {mission.deadline_day}",
+        f"Cast {assigned_roles}/{total_roles} · TR {translator} · Preset {preset_hint}",
+        f"Mods: {modifiers}",
+        f"Roles: {role_line}",
+    ])
+
+
 def _parse_mission_filters(args: Optional[list[str]]) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
     status: Optional[str] = None
     translator_parts: list[str] = []
@@ -848,7 +885,7 @@ def _board_keyboard() -> InlineKeyboardMarkup:
 def _board_text(state) -> str:
     if not GAME_USE_DB:
         mission = _ensure_bot_mission(state)
-        return "🗂️ Mission board (demo mode)" + chr(10) + chr(10) + mission_summary(mission)
+        return "🗂️ Mission board (demo mode)" + chr(10) + chr(10) + _mission_card_text(state, mission)
     chunks = ["🗂️ Mission board snapshot", "Use /missions for the full list or the filter buttons below."]
     try:
         snapshot = get_db_board_snapshot(state, sample_limit=3)
@@ -1153,7 +1190,7 @@ async def cmd_mission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     state = _load_or_create(update.effective_user.id)
     mission = _ensure_bot_mission(state)
     _save(state)
-    await update.effective_message.reply_text(mission_summary(mission), reply_markup=_selected_mission_keyboard())
+    await update.effective_message.reply_text(_mission_card_text(state, mission), reply_markup=_selected_mission_keyboard())
 
 
 async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1163,7 +1200,7 @@ async def cmd_dbmission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if mission is None:
             text = "❌ No suitable DB mission was found. Falling back to the standard /mission flow."
         else:
-            text = f"🗄️ DB mission loaded\n\n{mission_summary(mission)}"
+            text = f"🗄️ DB mission loaded\n\n{_mission_card_text(state, mission)}"
     except Exception as exc:
         text = f"❌ DB mission gagal load: {exc}"
     _save(state)
@@ -1311,7 +1348,7 @@ async def cmd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if mission is None:
                 text = f"❌ Mission {code} tak jumpa dalam DB."
             else:
-                text = f"🎯 Mission dipilih dari DB\n\n{mission_summary(mission)}"
+                text = f"🎯 Mission dipilih dari DB\n\n{_mission_card_text(state, mission)}"
         except Exception as exc:
             text = f"❌ Pick mission gagal: {exc}"
     _save(state)
@@ -1341,7 +1378,7 @@ async def cmd_accept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     _ensure_bot_mission(state)
     mission = accept_mission(state)
     _save(state)
-    await update.effective_message.reply_text(f"✅ Misi diterima!\n\n{mission_summary(mission)}", reply_markup=_selected_mission_keyboard())
+    await update.effective_message.reply_text(f"✅ Misi diterima!\n\n{_mission_card_text(state, mission)}", reply_markup=_selected_mission_keyboard())
 
 
 async def cmd_autocast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

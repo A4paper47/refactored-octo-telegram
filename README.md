@@ -1,22 +1,18 @@
-# Studio Dub Tycoon — Render Web Service Edition (v20)
+# Studio Dub Tycoon — Render Web Service Edition (v21)
 
 This package continues the cleaned Render Web Service build and extends both the dashboard and Telegram gameplay UI.
 
-## What changed in v20
+## What changed in v21
 
-- added **live simulator action decks** on the website dashboard
-  - copy-ready recommended preset action
-  - full recommended workflow copy
-  - assign/team/submit quick actions
-  - preset action deck for recommended, language-safe, workload-safe, and trait-polish flows
-  - operator summary card tied to the selected mission
-- upgraded Telegram mission flow with **one-tap preset apply buttons**
-  - `recommended`
-  - `lang`
-  - `workload`
-  - `trait`
-- `/accept`, `/mission`, and selected mission cards now surface preset buttons directly
-- refreshed dashboard copy and build id to `20260323-v20-live-sim-actions`
+- added **roster-backed quick actions** on the website dashboard
+  - recommended translator from the synced roster
+  - recommended role picks per mission role
+  - copy-ready assign commands built from the selected mission
+  - new API route: `/api/mission/<movie_code>/quick-actions`
+- refined Telegram mission cards to be **more compact and more informative**
+  - faster scan for client, reward, cast progress, and preset hint
+  - cleaner selected mission flow after `/mission`, `/pick`, `/accept`, and `/dbmission`
+- refreshed dashboard copy and build id to `20260326-v21-roster-quick-actions`
 
 ## Deploy
 

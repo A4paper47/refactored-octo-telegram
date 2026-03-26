@@ -1,18 +1,15 @@
-# Telegram UI Notes — v20 Live Simulator Actions + Preset Buttons
+# Telegram UI Notes — v21 Compact Mission Cards + Roster Quick Actions
 
-## New in v20
+## New in v21
 
-- mission flow now includes direct preset apply buttons on selected mission cards
-  - `recommended`
-  - `lang`
-  - `workload`
-  - `trait`
-- `/accept` now keeps you inside the mission flow instead of dropping back to the generic menu
-- dashboard simulator now includes:
-  - simulator action deck
-  - preset action deck
-  - operator summary card
-  - copy-ready recommended preset actions
+- selected mission replies are now more compact and more readable
+  - client / tier / language / priority on one line
+  - reward / XP / rep / deadline on one line
+  - cast progress + translator + preset hint together
+- dashboard mission detail now includes **roster-backed quick actions**
+  - recommended translator command
+  - recommended per-role assign commands
+  - top alternatives from the synced roster
 
 ## Suggested flow
 
@@ -20,17 +17,16 @@
 /start
 /missionsui
 /accept
-[tap a preset button]
+[tap preset button]
 /team
 /submit
 ```
 
-## Manual control flow
+## Website operator flow
 
 ```text
-/assignui
-/assignpreset recommended
-/assignpreset lang
-/assignpreset workload
-/assignpreset trait
+/dashboard
+select a mission row
+copy a roster-backed translator or role command
+paste into Telegram
 ```
